@@ -243,7 +243,7 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
     
     if (result['reminder_id'] != null || result['trigger_time'] != null) {
       final reminder = ReminderModel.fromJson(result);
-      await AlarmService().scheduleReminder(reminder);
+      await 
       
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('提醒已添加：${result['time_display'] ?? '已设定'}')),

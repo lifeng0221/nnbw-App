@@ -25,12 +25,16 @@ class VoiceService {
     if (!hasPermission) return false;
     
     try {
-      _currentRecordingPath = await _recorder.start(
+      final tempDir = await Directory.systemTemp.createTemp('voice_');
+      final tempPath = '${tempDir.path}/recording_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      _currentRecordingPath = tempPath;
+      await _recorder.start(
         const RecordConfig(
           encoder: AudioEncoder.aacLc,
           numChannels: 1,
           sampleRate: 16000,
         ),
+        path: tempPath,
       );
       _isRecording = true;
       return true;
