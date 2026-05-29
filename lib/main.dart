@@ -7,17 +7,11 @@ import 'screens/bind_screen.dart';
 import 'screens/login_screen.dart';
 import 'services/api_service.dart';
 import 'services/alarm_service.dart';
-import 'services/notification_service.dart';
+
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // 初始化通知
-  await NotificationService().init();
-  
-  // 初始化闹钟
   await AlarmService().init();
-  
   runApp(
     MultiProvider(
       providers: [
@@ -31,14 +25,12 @@ void main() async {
 
 class AppState extends ChangeNotifier {
   String? userId;
-  String? userRole; // 'parent' or 'child'
+  String? userRole;
   String? nickname;
-  List<Map<String, dynamic>> bindings = [];
-  
   bool get isLoggedIn => userId != null;
   bool get isParent => userRole == 'parent';
   bool get isChild => userRole == 'child';
-  
+
   Future<void> loadFromPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     userId = prefs.getString('user_id');
@@ -46,23 +38,18 @@ class AppState extends ChangeNotifier {
     nickname = prefs.getString('nickname');
     notifyListeners();
   }
-  
+
   Future<void> setUser(String id, String role, String name) async {
-    userId = id;
-    userRole = role;
-    nickname = name;
+    userId = id; userRole = role; nickname = name;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('user_id', id);
     await prefs.setString('user_role', role);
     await prefs.setString('nickname', name);
     notifyListeners();
   }
-  
+
   Future<void> logout() async {
-    userId = null;
-    userRole = null;
-    nickname = null;
-    bindings.clear();
+    userId = null; userRole = null; nickname = null;
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
     notifyListeners();
@@ -71,24 +58,12 @@ class AppState extends ChangeNotifier {
 
 class NianNianBuWangApp extends StatelessWidget {
   const NianNianBuWangApp({super.key});
-  
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: '念念不忘',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF2196F3),
-          brightness: Brightness.light,
-        ),
-        useMaterial3: true,
-        textTheme: const TextTheme(
-          bodyLarge: TextStyle(fontSize: 18),
-          bodyMedium: TextStyle(fontSize: 16),
-          titleLarge: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-        ),
-      ),
+      theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2196F3)), useMaterial3: true),
       home: const SplashScreen(),
     );
   }
@@ -96,79 +71,37 @@ class NianNianBuWangApp extends StatelessWidget {
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
-  
   @override
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
 class _SplashScreenState extends State<SplashScreen> {
   @override
-  void initState() {
-    super.initState();
-    _checkLogin();
-  }
-  
+  void initState() { super.initState(); _checkLogin(); }
+
   Future<void> _checkLogin() async {
     final appState = context.read<AppState>();
     await appState.loadFromPrefs();
-    
     await Future.delayed(const Duration(seconds: 1));
-    
     if (!mounted) return;
-    
     if (appState.isLoggedIn) {
-      if (appState.isParent) {
-        Navigator.pushReplacement(
-          context, 
-          MaterialPageRoute(builder: (_) => const ParentHomeScreen()),
-        );
-      } else {
-        Navigator.pushReplacement(
-          context, 
-          MaterialPageRoute(builder: (_) => const ChildHomeScreen()),
-        );
-      }
+      Navigator.pushReplacement(context, MaterialPageRoute(
+        builder: (_) => appState.isParent ? const ParentHomeScreen() : const ChildHomeScreen()));
     } else {
-      Navigator.pushReplacement(
-        context, 
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
-      );
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const LoginScreen()));
     }
   }
-  
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF2196F3),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(
-              Icons.notifications_active,
-              size: 80,
-              color: Colors.white,
-            ),
-            const SizedBox(height: 20),
-            const Text(
-              '念念不忘',
-              style: TextStyle(
-                fontSize: 36,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '到点一定响',
-              style: TextStyle(
-                fontSize: 18,
-                color: Colors.white.withAlpha(200),
-              ),
-            ),
-          ],
-        ),
-      ),
+    return Scaffold(backgroundColor: const Color(0xFF2196F3),
+      body: Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        const Icon(Icons.notifications_active, size: 80, color: Colors.white),
+        const SizedBox(height: 20),
+        const Text('念念不忘', style: TextStyle(fontSize: 36, fontWeight: FontWeight.bold, color: Colors.white)),
+        const SizedBox(height: 8),
+        Text('到点一定响', style: TextStyle(fontSize: 18, color: Colors.white.withAlpha(200))),
+      ])),
     );
   }
 }
