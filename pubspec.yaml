@@ -19,7 +19,7 @@ dependencies:
   dio: ^5.4.0
   
   # 语音
-  record: ^5.0.5
+  record: ^5.1.2
   audioplayers: ^5.2.1
   
   # 本地存储
