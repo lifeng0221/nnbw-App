@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 
 /// 暖炉风配色常量
 class WarmColors {
@@ -13,7 +14,7 @@ class WarmColors {
   static const Color important = Color(0xFFFF9800);
 }
 
-/// 老人友好的时间选择器 - 可滚动 + 暖炉风 + 取消按钮
+/// Bug 5 修复: 老人友好的时间选择器 - 滑动选择 + 暖炉风 + 老人大字
 class SimpleTimePicker extends StatefulWidget {
   final TimeOfDay initialTime;
   final ValueChanged<TimeOfDay> onTimeSelected;
@@ -41,11 +42,6 @@ class _SimpleTimePickerState extends State<SimpleTimePicker> {
     _minute = widget.initialTime.minute;
   }
 
-  void _incrementHour() => setState(() => _hour = (_hour + 1) % 24);
-  void _decrementHour() => setState(() => _hour = (_hour - 1) % 24);
-  void _incrementMinute() => setState(() => _minute = (_minute + 1) % 60);
-  void _decrementMinute() => setState(() => _minute = (_minute - 1) % 60);
-
   String _f(int v) => v.toString().padLeft(2, '0');
 
   @override
@@ -53,6 +49,10 @@ class _SimpleTimePickerState extends State<SimpleTimePicker> {
     return Container(
       constraints: BoxConstraints(
         maxHeight: MediaQuery.of(context).size.height * 0.65,
+      ),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       child: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
@@ -79,21 +79,136 @@ class _SimpleTimePickerState extends State<SimpleTimePicker> {
             ),
             const SizedBox(height: 16),
 
-            // 时间选择
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _buildNumberColumn(value: _f(_hour), onIncrement: _incrementHour, onDecrement: _decrementHour, label: '时'),
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 6),
-                  child: Text(':', style: TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: WarmColors.primary)),
-                ),
-                _buildNumberColumn(value: _f(_minute), onIncrement: _incrementMinute, onDecrement: _decrementMinute, label: '分'),
-              ],
+            // Bug 5 修复: 滑动选择器 - 大号数字显示 + 实时更新
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: WarmColors.primary.withOpacity(0.06),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: WarmColors.primary.withOpacity(0.3)),
+              ),
+              child: Column(
+                children: [
+                  // 大号时间显示
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        _f(_hour),
+                        style: const TextStyle(
+                          fontSize: 72,
+                          fontWeight: FontWeight.bold,
+                          color: WarmColors.primary,
+                        ),
+                      ),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8),
+                        child: Text(':', style: TextStyle(fontSize: 72, fontWeight: FontWeight.bold, color: WarmColors.primary)),
+                      ),
+                      Text(
+                        _f(_minute),
+                        style: const TextStyle(
+                          fontSize: 72,
+                          fontWeight: FontWeight.bold,
+                          color: WarmColors.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text('时', style: TextStyle(fontSize: 18, color: WarmColors.textSecondary)),
+                      const SizedBox(width: 60),
+                      Text('分', style: TextStyle(fontSize: 18, color: WarmColors.textSecondary)),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // 小时滑动条
+                  Row(
+                    children: [
+                      const Icon(Icons.schedule, color: WarmColors.primary, size: 20),
+                      const SizedBox(width: 8),
+                      const Text('小时', style: TextStyle(fontSize: 16, color: WarmColors.textDark, fontWeight: FontWeight.w500)),
+                      const Spacer(),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: WarmColors.primary,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          _f(_hour),
+                          style: const TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
+                  ),
+                  SliderTheme(
+                    data: SliderTheme.of(context).copyWith(
+                      activeTrackColor: WarmColors.primary,
+                      inactiveTrackColor: WarmColors.primary.withOpacity(0.2),
+                      thumbColor: WarmColors.primary,
+                      overlayColor: WarmColors.primary.withOpacity(0.2),
+                      trackHeight: 8,
+                      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 14),
+                    ),
+                    child: Slider(
+                      value: _hour.toDouble(),
+                      min: 0,
+                      max: 23,
+                      divisions: 23,
+                      onChanged: (v) => setState(() => _hour = v.round()),
+                    ),
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  // 分钟滑动条
+                  Row(
+                    children: [
+                      const Icon(Icons.timer, color: WarmColors.primary, size: 20),
+                      const SizedBox(width: 8),
+                      const Text('分钟', style: TextStyle(fontSize: 16, color: WarmColors.textDark, fontWeight: FontWeight.w500)),
+                      const Spacer(),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: WarmColors.primary,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          _f(_minute),
+                          style: const TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
+                  ),
+                  SliderTheme(
+                    data: SliderTheme.of(context).copyWith(
+                      activeTrackColor: WarmColors.primary,
+                      inactiveTrackColor: WarmColors.primary.withOpacity(0.2),
+                      thumbColor: WarmColors.primary,
+                      overlayColor: WarmColors.primary.withOpacity(0.2),
+                      trackHeight: 8,
+                      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 14),
+                    ),
+                    child: Slider(
+                      value: _minute.toDouble(),
+                      min: 0,
+                      max: 59,
+                      divisions: 59,
+                      onChanged: (v) => setState(() => _minute = v.round()),
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 16),
 
-            // 快捷时间
+            // 快捷时间（保留）
             const Text('快捷选择', style: TextStyle(fontSize: 16, color: WarmColors.textSecondary, fontWeight: FontWeight.bold)),
             const SizedBox(height: 10),
             Wrap(
@@ -128,27 +243,6 @@ class _SimpleTimePickerState extends State<SimpleTimePicker> {
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildNumberColumn({required String value, required VoidCallback onIncrement, required VoidCallback onDecrement, required String label}) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SizedBox(width: 72, height: 52,
-          child: IconButton(onPressed: onIncrement, icon: const Icon(Icons.expand_less, size: 36, color: WarmColors.primary),
-            style: IconButton.styleFrom(backgroundColor: WarmColors.primary.withOpacity(0.1), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))))),
-        const SizedBox(height: 4),
-        Container(width: 84, height: 70,
-          decoration: BoxDecoration(border: Border.all(color: WarmColors.primary, width: 2.5), borderRadius: BorderRadius.circular(14), color: WarmColors.primary.withOpacity(0.03)),
-          child: Center(child: Text(value, style: const TextStyle(fontSize: 42, fontWeight: FontWeight.bold, color: WarmColors.primary)))),
-        const SizedBox(height: 4),
-        SizedBox(width: 72, height: 52,
-          child: IconButton(onPressed: onDecrement, icon: const Icon(Icons.expand_more, size: 36, color: WarmColors.primary),
-            style: IconButton.styleFrom(backgroundColor: WarmColors.primary.withOpacity(0.1), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))))),
-        const SizedBox(height: 4),
-        Text(label, style: const TextStyle(fontSize: 16, color: WarmColors.textSecondary, fontWeight: FontWeight.bold)),
-      ],
     );
   }
 

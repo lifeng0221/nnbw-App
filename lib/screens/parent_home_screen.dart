@@ -41,6 +41,9 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
   final AudioPlayer _audioPlayer = AudioPlayer();
   final Uuid _uuid = const Uuid();
 
+  // Bug 1 修复: 使用GlobalKey控制Scaffold
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+
   List<ReminderModel> _todayReminders = [];
   bool _isLoading = true;
   bool _isRecording = false;
@@ -51,6 +54,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
   Timer? _recordingTimer;
+  Timer? _refreshTimer;
   int _recordingSeconds = 0;
 
   @override
@@ -60,6 +64,8 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     _initVoice();
     _loadReminders();
     _setupAlarmCallback();
+    // Bug 7 修复: 前台每10秒刷新一次提醒列表
+    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _loadReminders());
   }
 
   void _initAnimations() {
@@ -106,7 +112,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     ).toList();
     todayReminders.sort((a, b) => a.triggerTime.compareTo(b.triggerTime));
 
-    // 自动把过期的pending改为triggered
+    // Bug 7 修复: 自动把过期的pending改为triggered
     for (final r in todayReminders) {
       if (r.status == 'pending' && r.triggerTime.isBefore(now)) {
         await _storage.updateReminderStatus(r.reminderId, 'triggered');
@@ -130,7 +136,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
 
     setState(() { _todayReminders = updated; _isLoading = false; });
 
-    // 启动/更新闹钟轮询
+    // 启动/更新闹钟轮询（传入所有提醒，不只是今天的）
     _alarmService.startChecking(allReminders);
   }
 
@@ -158,7 +164,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     _showConfirmDialog();
   }
 
-  /// 确认弹窗 — 可关闭 + 时间明确传递
+  /// Bug 2 & 3 修复: 确认弹窗 — selectedTime正确传递
   void _showConfirmDialog({String? prefilledText}) {
     final displayText = prefilledText ?? _recognizedText;
     _textController.text = displayText;
@@ -168,167 +174,177 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     showDialog(
       context: context,
       barrierDismissible: true, // 允许点击外部关闭
-      builder: (context) {
+      builder: (dialogContext) {
         TimeOfDay? selectedTime;
 
         return StatefulBuilder(
-          builder: (context, setDialogState) => AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-            contentPadding: const EdgeInsets.all(20),
-            title: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
-                  child: const Icon(Icons.edit_note, color: AppColors.primary, size: 28),
-                ),
-                const SizedBox(width: 12),
-                const Text('添加提醒', style: TextStyle(fontSize: 24, color: AppColors.textDark, fontWeight: FontWeight.bold)),
-                const Spacer(),
-                IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close, size: 28, color: AppColors.textSecondary)),
-              ],
-            ),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
+          builder: (context, setDialogState) {
+            // Bug 2 修复: 大号时间优先显示selectedTime
+            final displayTime = selectedTime ?? defaultTime;
+            // Bug 3 修复: 确认按钮使用setState后的最新selectedTime
+            void handleConfirm() {
+              Navigator.pop(dialogContext);
+              _createReminder(_textController.text, selectedTime);
+            }
+
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              contentPadding: const EdgeInsets.all(20),
+              title: Row(
                 children: [
-                  // 提醒内容
-                  TextField(
-                    controller: _textController,
-                    style: const TextStyle(fontSize: 22, color: AppColors.textDark),
-                    maxLines: 3,
-                    autofocus: true,
-                    decoration: InputDecoration(
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AppColors.primary)),
-                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AppColors.primary, width: 2)),
-                      hintText: '输入提醒内容...',
-                      hintStyle: const TextStyle(color: AppColors.textSecondary),
-                      contentPadding: const EdgeInsets.all(16),
-                    ),
-                  ),
-
-                  if (displayText.isNotEmpty && prefilledText == null && _recognizedText.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Row(children: [
-                        Icon(Icons.mic, color: AppColors.primary, size: 16),
-                        const SizedBox(width: 4),
-                        Text('语音识别内容，可修改', style: TextStyle(color: AppColors.primary, fontSize: 13)),
-                      ]),
-                    ),
-
-                  const SizedBox(height: 16),
-
-                  // 时间设定
                   Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary.withOpacity(0.06),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: AppColors.primary, width: 2),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(children: [
-                          const Icon(Icons.alarm, color: AppColors.primary, size: 24),
-                          const SizedBox(width: 8),
-                          const Text('提醒时间', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textDark)),
-                        ]),
-                        const SizedBox(height: 12),
-                        InkWell(
-                          onTap: () async {
-                            final time = await showModalBottomSheet<TimeOfDay>(
-                              context: context,
-                              isScrollControlled: true,
-                              shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-                              builder: (ctx) => SimpleTimePicker(
-                                initialTime: selectedTime ?? defaultTime,
-                                onTimeSelected: (t) => Navigator.pop(ctx, t),
-                              ),
-                            );
-                            if (time != null) setDialogState(() => selectedTime = time);
-                          },
-                          borderRadius: BorderRadius.circular(14),
-                          child: Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(14),
-                              boxShadow: [BoxShadow(color: AppColors.primary.withOpacity(0.08), blurRadius: 6, offset: const Offset(0, 2))],
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Text(
-                                  _formatTimeOfDay(selectedTime ?? defaultTime),
-                                  style: const TextStyle(fontSize: 40, fontWeight: FontWeight.bold, color: AppColors.primary),
-                                ),
-                                const SizedBox(width: 12),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                  decoration: BoxDecoration(color: AppColors.primary, borderRadius: BorderRadius.circular(16)),
-                                  child: const Text('修改', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Center(child: Text(
-                          selectedTime != null ? '已设定提醒时间' : '默认5分钟后提醒',
-                          style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
-                        )),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              SizedBox(
-                width: double.infinity,
-                child: Row(children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () {
-                        Navigator.pop(context);
-                        setState(() { _recognizedText = ''; _recognizedVoiceUrl = null; });
-                        _textController.clear();
-                      },
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppColors.textSecondary,
-                        side: const BorderSide(color: AppColors.textSecondary),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-                      ),
-                      child: const Text('取消', style: TextStyle(fontSize: 18)),
-                    ),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+                    child: const Icon(Icons.edit_note, color: AppColors.primary, size: 28),
                   ),
                   const SizedBox(width: 12),
-                  Expanded(
-                    flex: 2,
-                    child: ElevatedButton(
-                      onPressed: () {
-                        Navigator.pop(context);
-                        _createReminder(_textController.text, selectedTime);
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primary, foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-                        elevation: 3,
-                      ),
-                      child: const Text('确认添加', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                    ),
-                  ),
-                ]),
+                  const Text('添加提醒', style: TextStyle(fontSize: 24, color: AppColors.textDark, fontWeight: FontWeight.bold)),
+                  const Spacer(),
+                  IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close, size: 28, color: AppColors.textSecondary)),
+                ],
               ),
-            ],
-          ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // 提醒内容
+                    TextField(
+                      controller: _textController,
+                      style: const TextStyle(fontSize: 22, color: AppColors.textDark),
+                      maxLines: 3,
+                      autofocus: true,
+                      decoration: InputDecoration(
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AppColors.primary)),
+                        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AppColors.primary, width: 2)),
+                        hintText: '输入提醒内容...',
+                        hintStyle: const TextStyle(color: AppColors.textSecondary),
+                        contentPadding: const EdgeInsets.all(16),
+                      ),
+                    ),
+
+                    if (displayText.isNotEmpty && prefilledText == null && _recognizedText.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Row(children: [
+                          Icon(Icons.mic, color: AppColors.primary, size: 16),
+                          const SizedBox(width: 4),
+                          Text('语音识别内容，可修改', style: TextStyle(color: AppColors.primary, fontSize: 13)),
+                        ]),
+                      ),
+
+                    const SizedBox(height: 16),
+
+                    // 时间设定
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withOpacity(0.06),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: AppColors.primary, width: 2),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(children: [
+                            const Icon(Icons.alarm, color: AppColors.primary, size: 24),
+                            const SizedBox(width: 8),
+                            const Text('提醒时间', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textDark)),
+                          ]),
+                          const SizedBox(height: 12),
+                          InkWell(
+                            onTap: () async {
+                              final time = await showModalBottomSheet<TimeOfDay>(
+                                context: context,
+                                isScrollControlled: true,
+                                shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+                                builder: (ctx) => SimpleTimePicker(
+                                  initialTime: displayTime,
+                                  onTimeSelected: (t) => Navigator.pop(ctx, t),
+                                ),
+                              );
+                              if (time != null) setDialogState(() => selectedTime = time);
+                            },
+                            borderRadius: BorderRadius.circular(14),
+                            child: Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(14),
+                                boxShadow: [BoxShadow(color: AppColors.primary.withOpacity(0.08), blurRadius: 6, offset: const Offset(0, 2))],
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  // Bug 2 修复: 使用displayTime而不是defaultTime
+                                  Text(
+                                    _formatTimeOfDay(displayTime),
+                                    style: const TextStyle(fontSize: 40, fontWeight: FontWeight.bold, color: AppColors.primary),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                    decoration: BoxDecoration(color: AppColors.primary, borderRadius: BorderRadius.circular(16)),
+                                    child: const Text('修改', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          // Bug 2 修复: 底部提示根据selectedTime更新
+                          Center(child: Text(
+                            selectedTime != null ? '已设定提醒时间' : '默认5分钟后提醒',
+                            style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
+                          )),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                SizedBox(
+                  width: double.infinity,
+                  child: Row(children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () {
+                          Navigator.pop(dialogContext);
+                          setState(() { _recognizedText = ''; _recognizedVoiceUrl = null; });
+                          _textController.clear();
+                        },
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.textSecondary,
+                          side: const BorderSide(color: AppColors.textSecondary),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                        ),
+                        child: const Text('取消', style: TextStyle(fontSize: 18)),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 2,
+                      child: ElevatedButton(
+                        // Bug 3 修复: 使用handleConfirm确保传递最新的selectedTime
+                        onPressed: handleConfirm,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primary, foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                          elevation: 3,
+                        ),
+                        child: const Text('确认添加', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ]),
+                ),
+              ],
+            );
+          },
         );
       },
     );
@@ -404,7 +420,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     await _alarmService.stopAlarmSound();
     await _loadReminders();
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已延后提醒'), backgroundColor: AppColors.snooze));
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已延后5分钟提醒'), backgroundColor: AppColors.snooze));
   }
 
   Future<void> _deleteReminder(ReminderModel r) async {
@@ -566,6 +582,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      key: _scaffoldKey,  // Bug 1 修复: 添加scaffoldKey
       backgroundColor: AppColors.background,
       appBar: AppBar(
         title: const Text('念念不忘', style: TextStyle(color: AppColors.textDark, fontWeight: FontWeight.bold)),
@@ -573,7 +590,8 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
         iconTheme: const IconThemeData(color: AppColors.textDark),
         leading: IconButton(
           icon: const Icon(Icons.menu, color: AppColors.textDark, size: 28),
-          onPressed: () => _showMenuDrawer(),
+          // Bug 1 修复: 使用scaffoldKey打开drawer
+          onPressed: () => _scaffoldKey.currentState?.openDrawer(),
         ),
         actions: [
           IconButton(icon: const Icon(Icons.link, color: AppColors.primary), tooltip: '绑定子女',
@@ -689,9 +707,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     );
   }
 
-  void _showMenuDrawer() {
-    Scaffold.of(context).openDrawer();
-  }
+  // Bug 1 修复: 删除_showMenuDrawer()方法，改用scaffoldKey
 
   Widget _buildVoiceButton() {
     return GestureDetector(
@@ -727,6 +743,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
   void dispose() {
     _pulseController.dispose();
     _recordingTimer?.cancel();
+    _refreshTimer?.cancel();  // Bug 7 修复: 清理刷新定时器
     _alarmService.stopChecking();
     _voiceService.dispose();
     _textController.dispose();

@@ -114,7 +114,9 @@ class LocalStorageService {
     return updateReminderStatus(reminderId, 'confirmed', confirmedAt: DateTime.now());
   }
   
-  /// Snooze提醒（延后5分钟）
+  /// Bug 4 修复: Snooze提醒（延后5分钟）
+  /// 关键修复：状态保持为'pending'，让闹钟轮询能在新时间再次触发
+  /// 原问题：状态设置成'snoozed'后，alarm_service轮询不会检查snoozed状态
   Future<bool> snoozeReminder(String reminderId) async {
     final prefs = await _preferences;
     final keys = prefs.getKeys().where((k) => k.startsWith(_remindersKey));
@@ -128,9 +130,11 @@ class LocalStorageService {
           final newList = jsonList.map((j) {
             if (j['reminder_id'] == reminderId) {
               updated = true;
-              j['status'] = 'snoozed';
+              // Bug 4 修复: 保持pending状态，这样轮询会再次触发
+              // 原来设置为'snoozed'导致轮询不再检查
+              j['status'] = 'pending';
               j['snooze_count'] = (j['snooze_count'] ?? 0) + 1;
-              // 延后5分钟
+              // Bug 4 修复: 延后5分钟
               final triggerTime = DateTime.parse(j['trigger_time']);
               j['trigger_time'] = triggerTime.add(const Duration(minutes: 5)).toIso8601String();
             }
@@ -257,7 +261,7 @@ class LocalStorageService {
             }
           }
         } catch (e) {
-          // ignore
+          // continue
         }
       }
     }

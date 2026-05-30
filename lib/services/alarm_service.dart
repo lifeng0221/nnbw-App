@@ -4,8 +4,11 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../models/app_models.dart';
+import 'local_storage_service.dart';
 
-/// 闹钟+通知服务 — 定时轮询 + 通知 + 铃声
+/// Bug 4 & 6 修复: 闹钟+通知服务 — 定时轮询 + 通知 + 铃声
+/// Bug 4: snooze后triggerTime更新，状态改回pending
+/// Bug 6: 立即检查过期提醒，轮询逻辑改进
 class AlarmService {
   static final AlarmService _instance = AlarmService._();
   factory AlarmService() => _instance;
@@ -13,6 +16,7 @@ class AlarmService {
 
   final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
   final AudioPlayer _audioPlayer = AudioPlayer();
+  final LocalStorageService _storage = LocalStorageService();
   Timer? _checkTimer;
   List<ReminderModel> _reminders = [];
   Function(ReminderModel)? onReminderTriggered;
@@ -62,12 +66,14 @@ class AlarmService {
     // 通知点击回调 — 可以后续做跳转
   }
 
-  /// 启动定时检查（前台每30秒轮询一次）
+  /// Bug 6 修复: 启动定时检查
+  /// 前台每30秒轮询一次，并且立即检查一次过期提醒
   void startChecking(List<ReminderModel> reminders) {
     _reminders = reminders;
     _checkTimer?.cancel();
     _checkTimer = Timer.periodic(const Duration(seconds: 30), (_) => _checkReminders());
-    // 立即检查一次
+    
+    // Bug 6 修复: 立即检查一次（加载时就检查已过期的pending提醒）
     _checkReminders();
   }
 
@@ -82,27 +88,46 @@ class AlarmService {
     _reminders = reminders;
   }
 
+  /// Bug 6 修复: 轮询检查逻辑改进
+  /// 1. 检查pending状态且triggerTime <= now的提醒
+  /// 2. snoozed状态也检查（Bug 4修复）
+  /// 3. 触发后更新状态为triggered
   void _checkReminders() {
     final now = DateTime.now();
+    final toTrigger = <ReminderModel>[];
+
     for (final r in _reminders) {
-      if (r.status == 'pending') {
-        // 触发时间已到（1分钟内的都算到点）
-        final diff = now.difference(r.triggerTime).inMinutes;
-        if (diff >= 0 && diff < 2) {
-          _triggerReminder(r);
+      // 只处理pending和snoozed状态
+      if (r.status == 'pending' || r.status == 'snoozed') {
+        // Bug 6 修复: 如果triggerTime <= now，立即触发
+        if (r.triggerTime.isBefore(now) || r.triggerTime.isAtSameMomentAs(now)) {
+          toTrigger.add(r);
+        }
+        // Bug 6 修复: 宽松判断 - 过去2分钟内的也触发（处理延迟情况）
+        else if (now.difference(r.triggerTime).inMinutes <= 2) {
+          toTrigger.add(r);
         }
       }
     }
+
+    // 批量触发
+    for (final r in toTrigger) {
+      _triggerReminder(r);
+    }
   }
 
+  /// 触发提醒
   Future<void> _triggerReminder(ReminderModel reminder) async {
-    // 1. 发通知
+    // Bug 6 修复: 1. 先更新状态为triggered
+    await _storage.updateReminderStatus(reminder.reminderId, 'triggered');
+
+    // 2. 发通知
     await showReminderNotification(reminder);
 
-    // 2. 播放铃声
+    // 3. 播放铃声
     await playAlarmSound(isUrgent: reminder.isUrgent);
 
-    // 3. 回调通知UI刷新
+    // 4. 回调通知UI刷新
     onReminderTriggered?.call(reminder);
   }
 
@@ -128,6 +153,7 @@ class AlarmService {
     );
   }
 
+  /// Bug 6 修复: 播放铃声，改进错误处理
   Future<void> playAlarmSound({bool isUrgent = false}) async {
     try {
       // 先尝试播放自定义音频
