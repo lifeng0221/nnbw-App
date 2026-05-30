@@ -8,6 +8,7 @@ import '../main.dart';
 import '../models/app_models.dart';
 import '../services/local_storage_service.dart';
 import '../services/voice_service.dart';
+import '../services/alarm_service.dart';
 import '../widgets/simple_time_picker.dart';
 import 'bind_screen.dart';
 
@@ -24,7 +25,7 @@ class AppColors {
   static const Color important = Color(0xFFFF9800);
 }
 
-/// 老人端首页 — 暖炉风 + 真实语音 + 删除 + 时间设定优化
+/// 老人端首页 — 暖炉风 + 语音 + 删除 + 定时响铃 + 导航
 class ParentHomeScreen extends StatefulWidget {
   const ParentHomeScreen({super.key});
   @override
@@ -34,6 +35,7 @@ class ParentHomeScreen extends StatefulWidget {
 class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProviderStateMixin {
   final VoiceService _voiceService = VoiceService();
   final LocalStorageService _storage = LocalStorageService();
+  final AlarmService _alarmService = AlarmService();
   final TextEditingController _textController = TextEditingController();
   final AudioPlayer _audioPlayer = AudioPlayer();
   final Uuid _uuid = const Uuid();
@@ -56,20 +58,21 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     _initAnimations();
     _initVoice();
     _loadReminders();
+    _setupAlarmCallback();
   }
 
   void _initAnimations() {
-    _pulseController = AnimationController(
-      duration: const Duration(milliseconds: 1200),
-      vsync: this,
-    );
-    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.4).animate(
-      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
-    );
+    _pulseController = AnimationController(duration: const Duration(milliseconds: 1200), vsync: this);
+    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.4).animate(CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut));
   }
 
-  Future<void> _initVoice() async {
-    await _voiceService.init();
+  Future<void> _initVoice() async => await _voiceService.init();
+
+  void _setupAlarmCallback() {
+    _alarmService.onReminderTriggered = (reminder) {
+      // 铃声响后刷新列表，把状态更新
+      _loadReminders();
+    };
   }
 
   Future<void> _loadReminders() async {
@@ -81,13 +84,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
 
     final bindings = await _storage.getBindings(appState.userId!);
     if (bindings.isEmpty) {
-      final testBinding = BindingModel(
-        bindingId: 'test_binding',
-        parentId: appState.userId!,
-        childId: 'child_test',
-        status: 'active',
-        createdAt: DateTime.now(),
-      );
+      final testBinding = BindingModel(bindingId: 'test_binding', parentId: appState.userId!, childId: 'child_test', status: 'active', createdAt: DateTime.now());
       await _storage.saveBinding(testBinding);
     }
 
@@ -108,22 +105,39 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     ).toList();
     todayReminders.sort((a, b) => a.triggerTime.compareTo(b.triggerTime));
 
-    setState(() { _todayReminders = todayReminders; _isLoading = false; });
+    // 自动把过期的pending改为triggered
+    for (final r in todayReminders) {
+      if (r.status == 'pending' && r.triggerTime.isBefore(now)) {
+        await _storage.updateReminderStatus(r.reminderId, 'triggered');
+      }
+    }
+    // 重新加载更新后的状态
+    allReminders = [];
+    for (final binding in bindings) {
+      final reminders = await _storage.getReminders(binding.bindingId);
+      allReminders.addAll(reminders);
+    }
+    if (allReminders.isEmpty) {
+      allReminders = await _storage.getReminders('test_binding');
+    }
+    final updated = allReminders.where((r) =>
+      r.triggerTime.year == now.year &&
+      r.triggerTime.month == now.month &&
+      r.triggerTime.day == now.day
+    ).toList();
+    updated.sort((a, b) => a.triggerTime.compareTo(b.triggerTime));
+
+    setState(() { _todayReminders = updated; _isLoading = false; });
+
+    // 启动/更新闹钟轮询
+    _alarmService.startChecking(allReminders);
   }
 
   Future<void> _startRecording() async {
     final started = await _voiceService.startListening(
-      onPartialResult: (text) {
-        setState(() => _partialText = text);
-      },
-      onResult: (text) {
-        setState(() {
-          _recognizedText = text;
-          _partialText = '';
-        });
-      },
+      onPartialResult: (text) => setState(() => _partialText = text),
+      onResult: (text) => setState(() { _recognizedText = text; _partialText = ''; }),
     );
-
     if (started) {
       setState(() { _isRecording = true; _recordingSeconds = 0; });
       _pulseController.repeat(reverse: true);
@@ -138,30 +152,23 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     _recordingTimer?.cancel();
     _pulseController.stop();
     _pulseController.reset();
-
     final text = await _voiceService.stopListening();
-
-    setState(() {
-      _isRecording = false;
-      if (text.isNotEmpty) {
-        _recognizedText = text;
-      }
-      _partialText = '';
-    });
-
+    setState(() { _isRecording = false; if (text.isNotEmpty) _recognizedText = text; _partialText = ''; });
     _showConfirmDialog();
   }
 
-  /// 统一的确认弹窗 — 语音和文字输入都走这里
+  /// 确认弹窗 — 可关闭 + 时间明确传递
   void _showConfirmDialog({String? prefilledText}) {
     final displayText = prefilledText ?? _recognizedText;
     _textController.text = displayText;
+    // 默认5分钟后
+    final defaultTime = TimeOfDay.fromDateTime(DateTime.now().add(const Duration(minutes: 5)));
 
     showDialog(
       context: context,
-      barrierDismissible: false,
+      barrierDismissible: true, // 允许点击外部关闭
       builder: (context) {
-        TimeOfDay? tempTime;
+        TimeOfDay? selectedTime;
 
         return StatefulBuilder(
           builder: (context, setDialogState) => AlertDialog(
@@ -175,7 +182,9 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
                   child: const Icon(Icons.edit_note, color: AppColors.primary, size: 28),
                 ),
                 const SizedBox(width: 12),
-                const Text('添加提醒', style: TextStyle(fontSize: 26, color: AppColors.textDark, fontWeight: FontWeight.bold)),
+                const Text('添加提醒', style: TextStyle(fontSize: 24, color: AppColors.textDark, fontWeight: FontWeight.bold)),
+                const Spacer(),
+                IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close, size: 28, color: AppColors.textSecondary)),
               ],
             ),
             content: SingleChildScrollView(
@@ -183,10 +192,10 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // 提醒内容输入
+                  // 提醒内容
                   TextField(
                     controller: _textController,
-                    style: const TextStyle(fontSize: 24, color: AppColors.textDark),
+                    style: const TextStyle(fontSize: 22, color: AppColors.textDark),
                     maxLines: 3,
                     autofocus: true,
                     decoration: InputDecoration(
@@ -198,7 +207,6 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
                     ),
                   ),
 
-                  // 语音来源标记
                   if (displayText.isNotEmpty && prefilledText == null && _recognizedText.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
@@ -209,78 +217,70 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
                       ]),
                     ),
 
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 16),
 
-                  // === 时间设定 — 超级醒目 ===
+                  // 时间设定
                   Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
                       color: AppColors.primary.withOpacity(0.06),
-                      borderRadius: BorderRadius.circular(16),
+                      borderRadius: BorderRadius.circular(14),
                       border: Border.all(color: AppColors.primary, width: 2),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(children: [
-                          const Icon(Icons.alarm, color: AppColors.primary, size: 26),
+                          const Icon(Icons.alarm, color: AppColors.primary, size: 24),
                           const SizedBox(width: 8),
-                          const Text('提醒时间', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.textDark)),
+                          const Text('提醒时间', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textDark)),
                         ]),
-                        const SizedBox(height: 14),
+                        const SizedBox(height: 12),
                         InkWell(
                           onTap: () async {
                             final time = await showModalBottomSheet<TimeOfDay>(
                               context: context,
+                              isScrollControlled: true,
                               shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
                               builder: (ctx) => SimpleTimePicker(
-                                initialTime: tempTime ?? TimeOfDay.fromDateTime(DateTime.now().add(const Duration(minutes: 5))),
+                                initialTime: selectedTime ?? defaultTime,
                                 onTimeSelected: (t) => Navigator.pop(ctx, t),
                               ),
                             );
-                            if (time != null) {
-                              setDialogState(() => tempTime = time);
-                            }
+                            if (time != null) setDialogState(() => selectedTime = time);
                           },
                           borderRadius: BorderRadius.circular(14),
                           child: Container(
                             width: double.infinity,
-                            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+                            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
                             decoration: BoxDecoration(
                               color: Colors.white,
                               borderRadius: BorderRadius.circular(14),
-                              boxShadow: [BoxShadow(color: AppColors.primary.withOpacity(0.1), blurRadius: 8, offset: const Offset(0, 2))],
+                              boxShadow: [BoxShadow(color: AppColors.primary.withOpacity(0.08), blurRadius: 6, offset: const Offset(0, 2))],
                             ),
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
                                 Text(
-                                  tempTime != null
-                                    ? '${tempTime!.hour.toString().padLeft(2, '0')}:${tempTime!.minute.toString().padLeft(2, '0')}'
-                                    : '${TimeOfDay.fromDateTime(DateTime.now().add(const Duration(minutes: 5))).hour.toString().padLeft(2, '0')}:${TimeOfDay.fromDateTime(DateTime.now().add(const Duration(minutes: 5))).minute.toString().padLeft(2, '0')}',
-                                  style: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: AppColors.primary),
+                                  _formatTimeOfDay(selectedTime ?? defaultTime),
+                                  style: const TextStyle(fontSize: 40, fontWeight: FontWeight.bold, color: AppColors.primary),
                                 ),
-                                const SizedBox(width: 16),
+                                const SizedBox(width: 12),
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                  decoration: BoxDecoration(
-                                    color: AppColors.primary,
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  child: const Text('点击修改', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                  decoration: BoxDecoration(color: AppColors.primary, borderRadius: BorderRadius.circular(16)),
+                                  child: const Text('修改', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
                                 ),
                               ],
                             ),
                           ),
                         ),
-                        const SizedBox(height: 8),
-                        Center(
-                          child: Text(
-                            tempTime != null ? '已选择提醒时间' : '默认5分钟后提醒',
-                            style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
-                          ),
-                        ),
+                        const SizedBox(height: 6),
+                        Center(child: Text(
+                          selectedTime != null ? '已设定提醒时间' : '默认5分钟后提醒',
+                          style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
+                        )),
                       ],
                     ),
                   ),
@@ -301,10 +301,10 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
                       style: OutlinedButton.styleFrom(
                         foregroundColor: AppColors.textSecondary,
                         side: const BorderSide(color: AppColors.textSecondary),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
                       ),
-                      child: const Text('取消', style: TextStyle(fontSize: 20)),
+                      child: const Text('取消', style: TextStyle(fontSize: 18)),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -313,16 +313,15 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
                     child: ElevatedButton(
                       onPressed: () {
                         Navigator.pop(context);
-                        _createReminder(_textController.text, tempTime);
+                        _createReminder(_textController.text, selectedTime);
                       },
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primary,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        backgroundColor: AppColors.primary, foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
                         elevation: 3,
                       ),
-                      child: const Text('确认添加', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                      child: const Text('确认添加', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                     ),
                   ),
                 ]),
@@ -334,10 +333,10 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     );
   }
 
+  String _formatTimeOfDay(TimeOfDay t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
   Future<void> _playVoice(String path) async {
-    if (await File(path).exists()) {
-      await _audioPlayer.play(DeviceFileSource(path));
-    }
+    if (await File(path).exists()) await _audioPlayer.play(DeviceFileSource(path));
   }
 
   Future<void> _createReminder(String text, TimeOfDay? time) async {
@@ -356,13 +355,15 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       bindings = [testBinding];
     }
 
+    // 精确使用用户选择的时间
+    final now = DateTime.now();
     DateTime triggerTime;
     if (time != null) {
-      final now = DateTime.now();
       triggerTime = DateTime(now.year, now.month, now.day, time.hour, time.minute);
+      // 如果选择的时间已过，顺延到明天
       if (triggerTime.isBefore(now)) triggerTime = triggerTime.add(const Duration(days: 1));
     } else {
-      triggerTime = DateTime.now().add(const Duration(minutes: 5));
+      triggerTime = now.add(const Duration(minutes: 5));
     }
 
     final reminder = ReminderModel(
@@ -379,16 +380,19 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     );
 
     await _storage.saveReminder(reminder);
-
     setState(() { _recognizedText = ''; _recognizedVoiceUrl = null; _textController.clear(); });
     await _loadReminders();
 
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('提醒已添加：$text'), backgroundColor: AppColors.confirm));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('提醒已添加：${_formatTimeOfDay(TimeOfDay.fromDateTime(triggerTime))} $text'),
+      backgroundColor: AppColors.confirm,
+    ));
   }
 
   Future<void> _confirmReminder(ReminderModel r) async {
     await _storage.confirmReminder(r.reminderId);
+    await _alarmService.stopAlarmSound();
     await _loadReminders();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已确认完成'), backgroundColor: AppColors.confirm));
@@ -396,6 +400,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
 
   Future<void> _snoozeReminder(ReminderModel r) async {
     await _storage.snoozeReminder(r.reminderId);
+    await _alarmService.stopAlarmSound();
     await _loadReminders();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已延后提醒'), backgroundColor: AppColors.snooze));
@@ -413,15 +418,10 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
         ]),
         content: Text('确定删除"${r.content}"吗？', style: const TextStyle(fontSize: 18)),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消', style: TextStyle(fontSize: 18)),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消', style: TextStyle(fontSize: 18))),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true),
             style: ElevatedButton.styleFrom(backgroundColor: AppColors.urgent, foregroundColor: Colors.white),
-            child: const Text('删除', style: TextStyle(fontSize: 18)),
-          ),
+            child: const Text('删除', style: TextStyle(fontSize: 18))),
         ],
       ),
     );
@@ -429,6 +429,19 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       await _storage.deleteReminder(r.reminderId);
       await _loadReminders();
     }
+  }
+
+  /// 判断提醒来源 — 比对当前用户ID
+  String _getCreatorLabel(ReminderModel r) {
+    final appState = context.read<AppState>();
+    if (appState.userId != null && r.createdBy == appState.userId) {
+      return '我自己设的';
+    }
+    // 也检查测试数据
+    if (r.createdBy == 'parent_test' || r.createdBy == appState.userId) {
+      return '我自己设的';
+    }
+    return '子女设的';
   }
 
   Widget _buildBody() {
@@ -486,12 +499,8 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
               Icon(r.isUrgent ? Icons.priority_high : Icons.flag, color: r.isUrgent ? AppColors.urgent : AppColors.important, size: 20),
             ],
             const Spacer(),
-            // 删除按钮
             Container(
-              decoration: BoxDecoration(
-                color: AppColors.urgent.withOpacity(0.08),
-                borderRadius: BorderRadius.circular(8),
-              ),
+              decoration: BoxDecoration(color: AppColors.urgent.withOpacity(0.08), borderRadius: BorderRadius.circular(8)),
               child: IconButton(
                 onPressed: () => _deleteReminder(r),
                 icon: const Icon(Icons.delete_outline, size: 22, color: AppColors.urgent),
@@ -501,24 +510,17 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
             ),
           ]),
           const SizedBox(height: 8),
-          // 内容 + 语音播放
           Row(children: [
             Expanded(child: Text(r.content, style: const TextStyle(fontSize: 20, color: AppColors.textDark), maxLines: 2, overflow: TextOverflow.ellipsis)),
             if (r.voiceUrl != null && r.voiceUrl!.isNotEmpty)
-              IconButton(
-                onPressed: () => _playVoice(r.voiceUrl!),
-                icon: const Icon(Icons.play_circle, size: 32, color: AppColors.primary),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-              ),
+              IconButton(onPressed: () => _playVoice(r.voiceUrl!), icon: const Icon(Icons.play_circle, size: 32, color: AppColors.primary), padding: EdgeInsets.zero, constraints: const BoxConstraints()),
           ]),
           const SizedBox(height: 4),
           Row(children: [
-            _buildTag(r.createdBy == 'parent_test' ? '我自己设的' : '子女设的', AppColors.primary),
+            _buildTag(_getCreatorLabel(r), AppColors.primary),
             const SizedBox(width: 6),
             _buildTag(r.category, AppColors.textSecondary),
           ]),
-          // 操作按钮（已响铃时）
           if (isActive)
             Padding(
               padding: const EdgeInsets.only(top: 14),
@@ -568,11 +570,17 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
         title: const Text('念念不忘', style: TextStyle(color: AppColors.textDark, fontWeight: FontWeight.bold)),
         centerTitle: true, elevation: 0, backgroundColor: AppColors.background,
         iconTheme: const IconThemeData(color: AppColors.textDark),
+        leading: IconButton(
+          icon: const Icon(Icons.menu, color: AppColors.textDark, size: 28),
+          onPressed: () => _showMenuDrawer(),
+        ),
         actions: [
           IconButton(icon: const Icon(Icons.link, color: AppColors.primary), tooltip: '绑定子女',
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BindScreen()))),
         ],
       ),
+      // 侧滑菜单
+      drawer: _buildDrawer(),
       body: Column(children: [
         // 今日提醒统计条
         Container(
@@ -593,7 +601,6 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
           decoration: BoxDecoration(color: Colors.white, boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 12, offset: const Offset(0, -3))]),
           child: Column(children: [
-            // 实时识别文字
             if (_partialText.isNotEmpty)
               Container(width: double.infinity, padding: const EdgeInsets.all(10), margin: const EdgeInsets.only(bottom: 8),
                 decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.05), borderRadius: BorderRadius.circular(10)),
@@ -602,22 +609,15 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
                   const SizedBox(width: 6),
                   Expanded(child: Text(_partialText, style: const TextStyle(fontSize: 16, color: AppColors.primary, fontStyle: FontStyle.italic))),
                 ])),
-            // 语音按钮
             _buildVoiceButton(),
             const SizedBox(height: 12),
-            // 文字输入 + 发送（文字输入也弹确认框设置时间）
             Row(children: [
               Expanded(
                 child: Container(
                   decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(28), border: Border.all(color: AppColors.primary.withOpacity(0.2))),
                   child: TextField(controller: _textController, style: const TextStyle(fontSize: 18, color: AppColors.textDark),
                     decoration: InputDecoration(hintText: '输入提醒内容...', hintStyle: const TextStyle(color: AppColors.textSecondary), border: InputBorder.none, contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14)),
-                    onSubmitted: (t) {
-                      if (t.isNotEmpty) {
-                        _recognizedText = '';
-                        _showConfirmDialog(prefilledText: t);
-                      }
-                    },
+                    onSubmitted: (t) { if (t.isNotEmpty) { _recognizedText = ''; _showConfirmDialog(prefilledText: t); } },
                   ),
                 ),
               ),
@@ -626,12 +626,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
                 decoration: BoxDecoration(color: AppColors.primary, shape: BoxShape.circle,
                   boxShadow: [BoxShadow(color: AppColors.primary.withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 2))]),
                 child: IconButton(
-                  onPressed: () {
-                    if (_textController.text.isNotEmpty) {
-                      _recognizedText = '';
-                      _showConfirmDialog(prefilledText: _textController.text);
-                    }
-                  },
+                  onPressed: () { if (_textController.text.isNotEmpty) { _recognizedText = ''; _showConfirmDialog(prefilledText: _textController.text); } },
                   icon: const Icon(Icons.send, color: Colors.white, size: 22), iconSize: 22),
               ),
             ]),
@@ -639,6 +634,62 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
         ),
       ]),
     );
+  }
+
+  /// 侧滑菜单
+  Widget _buildDrawer() {
+    final appState = context.read<AppState>();
+    return Drawer(
+      child: ListView(
+        padding: EdgeInsets.zero,
+        children: [
+          DrawerHeader(
+            decoration: const BoxDecoration(color: AppColors.primary),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.end, children: [
+              const Icon(Icons.notifications_active, color: Colors.white, size: 40),
+              const SizedBox(height: 8),
+              const Text('念念不忘', style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+              Text(appState.nickname ?? '老人端', style: const TextStyle(color: Colors.white70, fontSize: 14)),
+            ]),
+          ),
+          ListTile(
+            leading: const Icon(Icons.link, color: AppColors.primary),
+            title: const Text('绑定子女', style: TextStyle(fontSize: 18)),
+            onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (_) => const BindScreen())); },
+          ),
+          ListTile(
+            leading: const Icon(Icons.volume_up, color: AppColors.primary),
+            title: const Text('测试铃声', style: TextStyle(fontSize: 18)),
+            onTap: () { Navigator.pop(context); _alarmService.playAlarmSound(); },
+          ),
+          ListTile(
+            leading: const Icon(Icons.notifications, color: AppColors.primary),
+            title: const Text('测试通知', style: TextStyle(fontSize: 18)),
+            onTap: () {
+              Navigator.pop(context);
+              _alarmService.showReminderNotification(ReminderModel(
+                reminderId: 'test', bindingId: 'test', createdBy: 'test', content: '这是一条测试通知', triggerTime: DateTime.now(), status: 'pending', createdAt: DateTime.now(),
+              ));
+            },
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.logout, color: AppColors.urgent),
+            title: const Text('退出登录', style: TextStyle(fontSize: 18)),
+            onTap: () async {
+              Navigator.pop(context);
+              await appState.logout();
+              if (!mounted) return;
+              Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const LoginScreen()));
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showMenuDrawer() {
+    Scaffold.of(context).openDrawer();
   }
 
   Widget _buildVoiceButton() {
@@ -675,6 +726,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
   void dispose() {
     _pulseController.dispose();
     _recordingTimer?.cancel();
+    _alarmService.stopChecking();
     _voiceService.dispose();
     _textController.dispose();
     _audioPlayer.dispose();
