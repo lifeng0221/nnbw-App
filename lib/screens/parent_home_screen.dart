@@ -11,6 +11,7 @@ import '../services/voice_service.dart';
 import '../services/alarm_service.dart';
 import '../widgets/simple_time_picker.dart';
 import 'bind_screen.dart';
+import 'login_screen.dart';
 
 /// 暖炉风配色
 class AppColors {
