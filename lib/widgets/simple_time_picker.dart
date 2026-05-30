@@ -1,6 +1,19 @@
 import 'package:flutter/material.dart';
 
-/// 老人友好的时间选择器 - 大数字 + 加减按钮
+/// 暖炉风配色常量
+class WarmColors {
+  static const Color background = Color(0xFFFFF8F0);
+  static const Color primary = Color(0xFFFF8C42);
+  static const Color confirm = Color(0xFF4CAF50);
+  static const Color snooze = Color(0xFFFFB74D);
+  static const Color textDark = Color(0xFF3E2723);
+  static const Color textSecondary = Color(0xFF8D6E63);
+  static const CardBg = Color(0xFFFFFFFF);
+  static const Color urgent = Color(0xFFE53935);
+  static const Color important = Color(0xFFFF9800);
+}
+
+/// 老人友好的时间选择器 - 大数字 + 加减按钮 + 暖炉风
 class SimpleTimePicker extends StatefulWidget {
   final TimeOfDay initialTime;
   final ValueChanged<TimeOfDay> onTimeSelected;
@@ -26,73 +39,58 @@ class _SimpleTimePickerState extends State<SimpleTimePicker> {
     _minute = widget.initialTime.minute;
   }
 
-  void _incrementHour() {
-    setState(() {
-      _hour = (_hour + 1) % 24;
-    });
-  }
+  void _incrementHour() => setState(() => _hour = (_hour + 1) % 24);
+  void _decrementHour() => setState(() => _hour = (_hour - 1) % 24);
+  void _incrementMinute() => setState(() => _minute = (_minute + 1) % 60);
+  void _decrementMinute() => setState(() => _minute = (_minute - 1) % 60);
 
-  void _decrementHour() {
-    setState(() {
-      _hour = (_hour - 1) % 24;
-    });
-  }
-
-  void _incrementMinute() {
-    setState(() {
-      _minute = (_minute + 1) % 60;
-    });
-  }
-
-  void _decrementMinute() {
-    setState(() {
-      _minute = (_minute - 1) % 60;
-    });
-  }
-
-  String _formatHour() {
-    return _hour.toString().padLeft(2, '0');
-  }
-
-  String _formatMinute() {
-    return _minute.toString().padLeft(2, '0');
-  }
+  String _f(int v) => v.toString().padLeft(2, '0');
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // 标题
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // 小时
+              Icon(Icons.access_time, color: WarmColors.primary, size: 28),
+              const SizedBox(width: 8),
+              const Text('选择提醒时间', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: WarmColors.textDark)),
+            ],
+          ),
+          const SizedBox(height: 24),
+
+          // 时间选择
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
               _buildNumberColumn(
-                value: _formatHour(),
+                value: _f(_hour),
                 onIncrement: _incrementHour,
                 onDecrement: _decrementHour,
                 label: '时',
               ),
-              
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 8),
-                child: Text(':', style: TextStyle(fontSize: 48, fontWeight: FontWeight.bold)),
+                child: Text(':', style: TextStyle(fontSize: 52, fontWeight: FontWeight.bold, color: WarmColors.primary)),
               ),
-              
-              // 分钟
               _buildNumberColumn(
-                value: _formatMinute(),
+                value: _f(_minute),
                 onIncrement: _incrementMinute,
                 onDecrement: _decrementMinute,
                 label: '分',
               ),
             ],
           ),
-          const SizedBox(height: 20),
-          
-          // 快捷时间按钮
+          const SizedBox(height: 24),
+
+          // 快捷时间
+          const Text('快捷选择', style: TextStyle(fontSize: 16, color: WarmColors.textSecondary, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -107,24 +105,21 @@ class _SimpleTimePickerState extends State<SimpleTimePicker> {
               _buildQuickButton('晚上8点', () => _quickTime(20, 0)),
             ],
           ),
-          const SizedBox(height: 16),
-          
-          // 确认按钮
+          const SizedBox(height: 20),
+
+          // 确认按钮 — 大号暖橙
           SizedBox(
             width: double.infinity,
-            height: 52,
+            height: 56,
             child: ElevatedButton(
-              onPressed: () {
-                widget.onTimeSelected(TimeOfDay(hour: _hour, minute: _minute));
-              },
+              onPressed: () => widget.onTimeSelected(TimeOfDay(hour: _hour, minute: _minute)),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue,
+                backgroundColor: WarmColors.primary,
                 foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(26),
-                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+                elevation: 2,
               ),
-              child: const Text('确定', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              child: const Text('确定', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
             ),
           ),
         ],
@@ -141,100 +136,66 @@ class _SimpleTimePickerState extends State<SimpleTimePicker> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // 加号按钮
         SizedBox(
-          width: 72,
+          width: 76,
           height: 56,
           child: IconButton(
             onPressed: onIncrement,
-            icon: const Icon(Icons.expand_less, size: 36),
+            icon: const Icon(Icons.expand_less, size: 40, color: WarmColors.primary),
             style: IconButton.styleFrom(
-              backgroundColor: Colors.blue[50],
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              backgroundColor: WarmColors.primary.withOpacity(0.1),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
             ),
           ),
         ),
         const SizedBox(height: 4),
-        // 数字
         Container(
-          width: 80,
-          height: 72,
+          width: 88,
+          height: 76,
           decoration: BoxDecoration(
-            border: Border.all(color: Colors.blue, width: 2),
-            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: WarmColors.primary, width: 2.5),
+            borderRadius: BorderRadius.circular(14),
+            color: WarmColors.primary.withOpacity(0.03),
           ),
           child: Center(
-            child: Text(
-              value,
-              style: const TextStyle(
-                fontSize: 40,
-                fontWeight: FontWeight.bold,
-                color: Colors.blue,
-              ),
-            ),
+            child: Text(value, style: const TextStyle(fontSize: 44, fontWeight: FontWeight.bold, color: WarmColors.primary)),
           ),
         ),
         const SizedBox(height: 4),
-        // 减号按钮
         SizedBox(
-          width: 72,
+          width: 76,
           height: 56,
           child: IconButton(
             onPressed: onDecrement,
-            icon: const Icon(Icons.expand_more, size: 36),
+            icon: const Icon(Icons.expand_more, size: 40, color: WarmColors.primary),
             style: IconButton.styleFrom(
-              backgroundColor: Colors.blue[50],
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              backgroundColor: WarmColors.primary.withOpacity(0.1),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
             ),
           ),
         ),
         const SizedBox(height: 4),
-        Text(label, style: const TextStyle(fontSize: 14, color: Colors.grey)),
+        Text(label, style: const TextStyle(fontSize: 16, color: WarmColors.textSecondary, fontWeight: FontWeight.bold)),
       ],
     );
   }
 
   Widget _buildQuickButton(String label, VoidCallback onTap) {
     return ActionChip(
-      label: Text(label, style: const TextStyle(fontSize: 14)),
+      label: Text(label, style: const TextStyle(fontSize: 15, color: WarmColors.textDark)),
       onPressed: onTap,
-      backgroundColor: Colors.grey[100],
-      side: BorderSide(color: Colors.grey[300]!),
+      backgroundColor: WarmColors.primary.withOpacity(0.08),
+      side: const BorderSide(color: WarmColors.primary, width: 1),
+      labelPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
     );
   }
 
   void _quickMinutes(int minutes) {
-    final now = DateTime.now();
-    final target = now.add(Duration(minutes: minutes));
-    setState(() {
-      _hour = target.hour;
-      _minute = target.minute;
-    });
+    final target = DateTime.now().add(Duration(minutes: minutes));
+    setState(() { _hour = target.hour; _minute = target.minute; });
   }
 
   void _quickTime(int hour, int minute) {
-    setState(() {
-      _hour = hour;
-      _minute = minute;
-    });
+    setState(() { _hour = hour; _minute = minute; });
   }
-}
-
-/// 弹出时间选择器的便捷方法
-Future<TimeOfDay?> showSimpleTimePicker(BuildContext context, {TimeOfDay? initialTime}) {
-  TimeOfDay? result;
-  showModalBottomSheet(
-    context: context,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-    ),
-    builder: (context) => SimpleTimePicker(
-      initialTime: initialTime ?? TimeOfDay.now(),
-      onTimeSelected: (time) {
-        result = time;
-        Navigator.pop(context);
-      },
-    ),
-  );
-  return Future.value(result);
 }
