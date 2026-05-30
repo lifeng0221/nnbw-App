@@ -63,7 +63,18 @@ class NianNianBuWangApp extends StatelessWidget {
     return MaterialApp(
       title: '念念不忘',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2196F3)), useMaterial3: true),
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFFFF8C42),
+          brightness: Brightness.light,
+        ),
+        useMaterial3: true,
+        scaffoldBackgroundColor: const Color(0xFFFFF8F0),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFFFFF8F0),
+          elevation: 0,
+        ),
+      ),
       home: const SplashScreen(),
     );
   }
@@ -94,7 +105,8 @@ class _SplashScreenState extends State<SplashScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(backgroundColor: const Color(0xFF2196F3),
+    return Scaffold(
+      backgroundColor: const Color(0xFFFF8C42),
       body: Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
         const Icon(Icons.notifications_active, size: 80, color: Colors.white),
         const SizedBox(height: 20),

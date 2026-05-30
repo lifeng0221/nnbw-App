@@ -6,9 +6,10 @@ import '../main.dart';
 import '../models/app_models.dart';
 import '../services/local_storage_service.dart';
 import '../widgets/reminder_card.dart';
+import '../widgets/simple_time_picker.dart';
 import 'bind_screen.dart';
 
-/// 子女端首页
+/// 子女端首页 — 暖炉风
 class ChildHomeScreen extends StatefulWidget {
   const ChildHomeScreen({super.key});
   
@@ -49,10 +50,8 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
       return;
     }
     
-    // 获取绑定关系
     List<BindingModel> bindings = await _storage.getBindings(appState.userId!);
     
-    // 如果没有绑定，创建一个测试绑定
     if (bindings.isEmpty) {
       final testBinding = BindingModel(
         bindingId: 'test_binding',
@@ -71,7 +70,6 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
       allReminders.addAll(reminders);
     }
     
-    // 也尝试从测试绑定获取
     if (allReminders.isEmpty) {
       allReminders = await _storage.getReminders('test_binding');
     }
@@ -98,69 +96,61 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) => StatefulBuilder(
-        builder: (context, setModalState) => Padding(
+        builder: (context, setModalState) => Container(
           padding: EdgeInsets.only(
-            left: 20,
-            right: 20,
-            top: 16,
-            bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+            left: 20, right: 20, top: 16,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 20,
           ),
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 标题栏
+                // 标题
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Row(
                       children: [
                         Container(
-                          padding: const EdgeInsets.all(8),
+                          padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: Colors.blue[50],
-                            borderRadius: BorderRadius.circular(8),
+                            color: const Color(0xFFFF8C42).withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(10),
                           ),
-                          child: const Icon(Icons.add_alarm, color: Colors.blue),
+                          child: const Icon(Icons.add_alarm, color: Color(0xFFFF8C42)),
                         ),
                         const SizedBox(width: 12),
-                        const Text(
-                          '为爸妈设提醒',
-                          style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                        ),
+                        const Text('为爸妈设提醒', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF3E2723))),
                       ],
                     ),
-                    IconButton(
-                      onPressed: () => Navigator.pop(context),
-                      icon: const Icon(Icons.close),
-                    ),
+                    IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close, color: Color(0xFF8D6E63))),
                   ],
                 ),
                 const SizedBox(height: 20),
                 
-                // 提醒内容输入
+                // 提醒内容
                 TextField(
                   controller: _textController,
-                  style: const TextStyle(fontSize: 18),
+                  style: const TextStyle(fontSize: 18, color: Color(0xFF3E2723)),
                   maxLines: 3,
                   autofocus: true,
                   decoration: InputDecoration(
                     labelText: '提醒内容',
                     hintText: '例如：记得吃药',
-                    border: OutlineInputBorder(
+                    labelStyle: const TextStyle(color: Color(0xFFFF8C42)),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Color(0xFFFF8C42), width: 2),
                     ),
                     contentPadding: const EdgeInsets.all(16),
                   ),
                 ),
                 const SizedBox(height: 20),
                 
-                // 日期选择
-                const Text(
-                  '提醒日期',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
+                // 日期
+                const Text('提醒日期', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF3E2723))),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 8,
@@ -172,17 +162,20 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
                 ),
                 const SizedBox(height: 16),
                 
-                // 时间选择
-                const Text(
-                  '提醒时间',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
+                // 时间
+                const Text('提醒时间', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF3E2723))),
                 const SizedBox(height: 8),
                 InkWell(
                   onTap: () async {
-                    final time = await showTimePicker(
+                    final time = await showModalBottomSheet<TimeOfDay>(
                       context: context,
-                      initialTime: _selectedTime,
+                      shape: const RoundedRectangleBorder(
+                        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                      ),
+                      builder: (ctx) => SimpleTimePicker(
+                        initialTime: _selectedTime,
+                        onTimeSelected: (t) => Navigator.pop(ctx, t),
+                      ),
                     );
                     if (time != null) {
                       setModalState(() => _selectedTime = time);
@@ -191,68 +184,53 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
                   child: Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey[300]!),
+                      border: Border.all(color: const Color(0xFFFF8C42).withOpacity(0.3)),
                       borderRadius: BorderRadius.circular(12),
+                      color: const Color(0xFFFF8C42).withOpacity(0.05),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.access_time, color: Colors.blue),
+                        const Icon(Icons.access_time, color: Color(0xFFFF8C42)),
                         const SizedBox(width: 12),
                         Text(
                           _selectedTime.format(context),
-                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF3E2723)),
                         ),
                         const Spacer(),
-                        Text(
-                          '点击修改',
-                          style: TextStyle(color: Colors.grey[600], fontSize: 14),
-                        ),
+                        Text('点击修改', style: TextStyle(color: Colors.grey[600], fontSize: 14)),
                       ],
                     ),
                   ),
                 ),
                 const SizedBox(height: 20),
                 
-                // 分类选择
-                const Text(
-                  '分类',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
+                // 分类
+                const Text('分类', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF3E2723))),
                 const SizedBox(height: 8),
                 Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
+                  spacing: 8, runSpacing: 8,
                   children: _categories.map((cat) {
                     final isSelected = _selectedCategory == cat['value'];
                     return ChoiceChip(
-                      label: Text(
-                        '${cat['icon']} ${cat['label']}',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: isSelected ? Colors.white : Colors.black87,
-                        ),
-                      ),
+                      label: Text('${cat['icon']} ${cat['label']}', style: TextStyle(fontSize: 16, color: isSelected ? Colors.white : const Color(0xFF3E2723))),
                       selected: isSelected,
-                      selectedColor: Colors.blue,
+                      selectedColor: const Color(0xFFFF8C42),
                       onSelected: (_) => setModalState(() => _selectedCategory = cat['value']!),
                     );
                   }).toList(),
                 ),
                 const SizedBox(height: 20),
                 
-                // 优先级选择
-                const Text(
-                  '优先级',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
+                // 优先级
+                const Text('优先级', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF3E2723))),
                 const SizedBox(height: 8),
                 Row(
                   children: [
                     _buildPriorityChip('普通', 'normal', Colors.grey, setModalState),
                     const SizedBox(width: 8),
-                    _buildPriorityChip('重要', 'important', Colors.orange, setModalState),
+                    _buildPriorityChip('重要', 'important', const Color(0xFFFF9800), setModalState),
                     const SizedBox(width: 8),
-                    _buildPriorityChip('紧急', 'urgent', Colors.red, setModalState),
+                    _buildPriorityChip('紧急', 'urgent', const Color(0xFFE53935), setModalState),
                   ],
                 ),
                 const SizedBox(height: 24),
@@ -267,16 +245,11 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
                       _createReminder();
                     },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blue,
+                      backgroundColor: const Color(0xFFFF8C42),
                       foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(28),
-                      ),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
                     ),
-                    child: const Text(
-                      '确认添加提醒',
-                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                    ),
+                    child: const Text('确认添加提醒', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                   ),
                 ),
               ],
@@ -288,31 +261,20 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
   }
   
   Widget _buildDateChip(String label, DateTime date, StateSetter setModalState) {
-    final isSelected = _selectedDate.year == date.year &&
-        _selectedDate.month == date.month &&
-        _selectedDate.day == date.day;
-    
+    final isSelected = _selectedDate.year == date.year && _selectedDate.month == date.month && _selectedDate.day == date.day;
     return ChoiceChip(
       label: Text(label),
       selected: isSelected,
-      selectedColor: Colors.blue,
-      labelStyle: TextStyle(
-        color: isSelected ? Colors.white : Colors.black87,
-      ),
+      selectedColor: const Color(0xFFFF8C42),
+      labelStyle: TextStyle(color: isSelected ? Colors.white : const Color(0xFF3E2723)),
       onSelected: (_) => setModalState(() => _selectedDate = date),
     );
   }
   
   Widget _buildPriorityChip(String label, String value, Color color, StateSetter setModalState) {
     final isSelected = _selectedPriority == value;
-    
     return ChoiceChip(
-      label: Text(
-        label,
-        style: TextStyle(
-          color: isSelected ? Colors.white : color,
-        ),
-      ),
+      label: Text(label, style: TextStyle(color: isSelected ? Colors.white : color)),
       selected: isSelected,
       selectedColor: color,
       backgroundColor: color.withOpacity(0.1),
@@ -324,44 +286,23 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
   Future<void> _createReminder() async {
     final text = _textController.text.trim();
     if (text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请输入提醒内容')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('请输入提醒内容')));
       return;
     }
     
     final appState = context.read<AppState>();
     if (appState.userId == null) return;
     
-    // 获取绑定关系
     List<BindingModel> bindings = await _storage.getBindings(appState.userId!);
+    if (bindings.isEmpty) bindings = await _storage.getBindings('child_test');
     if (bindings.isEmpty) {
-      bindings = await _storage.getBindings('child_test');
-    }
-    
-    // 如果还是没有，创建测试绑定
-    if (bindings.isEmpty) {
-      final testBinding = BindingModel(
-        bindingId: 'test_binding',
-        parentId: 'parent_test',
-        childId: appState.userId!,
-        status: 'active',
-        createdAt: DateTime.now(),
-      );
+      final testBinding = BindingModel(bindingId: 'test_binding', parentId: 'parent_test', childId: appState.userId!, status: 'active', createdAt: DateTime.now());
       await _storage.saveBinding(testBinding);
       bindings = [testBinding];
     }
     
     final binding = bindings.first;
-    
-    // 计算触发时间
-    final triggerTime = DateTime(
-      _selectedDate.year,
-      _selectedDate.month,
-      _selectedDate.day,
-      _selectedTime.hour,
-      _selectedTime.minute,
-    );
+    final triggerTime = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day, _selectedTime.hour, _selectedTime.minute);
     
     final reminder = ReminderModel(
       reminderId: _uuid.v4(),
@@ -377,16 +318,11 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
     
     await _storage.saveReminder(reminder);
     _textController.clear();
-    
-    // 刷新列表
     await _loadData();
     
     if (!mounted) return;
-    
     final timeStr = DateFormat('MM/dd HH:mm').format(triggerTime);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('提醒已添加：$timeStr')),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('提醒已添加：$timeStr'), backgroundColor: const Color(0xFF4CAF50)));
   }
   
   Future<void> _deleteReminder(ReminderModel reminder) async {
@@ -397,15 +333,8 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
         title: const Text('删除提醒'),
         content: Text('确定删除"${reminder.content}"吗？'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('删除'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFE53935)), child: const Text('删除')),
         ],
       ),
     );
@@ -413,35 +342,31 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
     if (confirmed == true) {
       await _storage.deleteReminder(reminder.reminderId);
       await _loadData();
-      
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('提醒已删除')),
-      );
     }
   }
   
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFFFFF8F0),
       appBar: AppBar(
-        title: const Text('念念不忘'),
+        title: const Text('念念不忘', style: TextStyle(color: Color(0xFF3E2723), fontWeight: FontWeight.bold)),
         centerTitle: true,
         elevation: 0,
+        backgroundColor: const Color(0xFFFFF8F0),
+        iconTheme: const IconThemeData(color: Color(0xFF3E2723)),
         actions: [
           IconButton(
-            icon: const Icon(Icons.link),
+            icon: const Icon(Icons.link, color: Color(0xFFFF8C42)),
             tooltip: '生成配对码',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const BindScreen()),
-            ),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BindScreen())),
           ),
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFFFF8C42)))
           : RefreshIndicator(
+              color: const Color(0xFFFF8C42),
               onRefresh: _loadData,
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
@@ -449,48 +374,26 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // 爸妈状态卡片
                     _buildParentStatusCard(),
                     const SizedBox(height: 24),
-                    
-                    // 提醒列表标题
                     Row(
                       children: [
-                        Container(
-                          width: 4,
-                          height: 24,
-                          decoration: BoxDecoration(
-                            color: Colors.blue,
-                            borderRadius: BorderRadius.circular(2),
-                          ),
-                        ),
+                        Container(width: 4, height: 24, decoration: BoxDecoration(color: const Color(0xFFFF8C42), borderRadius: BorderRadius.circular(2))),
                         const SizedBox(width: 8),
-                        const Text(
-                          '提醒列表',
-                          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                        ),
+                        const Text('提醒列表', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF3E2723))),
                         const Spacer(),
-                        Text(
-                          '共${_reminders.length}条',
-                          style: TextStyle(color: Colors.grey[600]),
-                        ),
+                        Text('共${_reminders.length}条', style: const TextStyle(color: Color(0xFF8D6E63))),
                       ],
                     ),
                     const SizedBox(height: 12),
-                    
                     if (_reminders.isEmpty)
                       _buildEmptyState()
                     else
                       ..._reminders.map((r) => Padding(
                         padding: const EdgeInsets.only(bottom: 8),
-                        child: ReminderCard(
-                          reminder: r,
-                          isParent: false,
-                          onDelete: () => _deleteReminder(r),
-                        ),
+                        child: ReminderCard(reminder: r, isParent: false, onDelete: () => _deleteReminder(r)),
                       )),
-                    
-                    const SizedBox(height: 80), // 留出FAB空间
+                    const SizedBox(height: 80),
                   ],
                 ),
               ),
@@ -499,16 +402,16 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
         onPressed: _showCreateReminderSheet,
         icon: const Icon(Icons.add),
         label: const Text('设提醒'),
-        backgroundColor: Colors.blue,
+        backgroundColor: const Color(0xFFFF8C42),
         foregroundColor: Colors.white,
       ),
     );
   }
   
   Widget _buildParentStatusCard() {
-    final pendingCount = _reminders.where((r) => r.status == 'pending' || r.status == 'triggered').length;
-    final confirmedCount = _reminders.where((r) => r.status == 'confirmed').length;
-    final snoozedCount = _reminders.where((r) => r.status == 'snoozed').length;
+    final pending = _reminders.where((r) => r.status == 'pending' || r.status == 'triggered').length;
+    final confirmed = _reminders.where((r) => r.status == 'confirmed').length;
+    final snoozed = _reminders.where((r) => r.status == 'snoozed').length;
     
     return Card(
       elevation: 2,
@@ -522,26 +425,20 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
               children: [
                 Container(
                   padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.blue[50],
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(Icons.family_restroom, size: 28, color: Colors.blue),
+                  decoration: BoxDecoration(color: const Color(0xFFFF8C42).withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+                  child: const Icon(Icons.family_restroom, size: 28, color: Color(0xFFFF8C42)),
                 ),
                 const SizedBox(width: 12),
-                const Text(
-                  '看看爸妈',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                ),
+                const Text('看看爸妈', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF3E2723))),
               ],
             ),
             const SizedBox(height: 20),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                _buildStatItem('待响', pendingCount.toString(), Colors.blue),
-                _buildStatItem('已完成', confirmedCount.toString(), Colors.green),
-                _buildStatItem('稍后', snoozedCount.toString(), Colors.orange),
+                _buildStatItem('待响', pending.toString(), const Color(0xFFFF8C42)),
+                _buildStatItem('已完成', confirmed.toString(), const Color(0xFF4CAF50)),
+                _buildStatItem('稍后', snoozed.toString(), const Color(0xFFFFB74D)),
               ],
             ),
           ],
@@ -554,25 +451,12 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
     return Column(
       children: [
         Container(
-          width: 56,
-          height: 56,
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Center(
-            child: Text(
-              value,
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: color,
-              ),
-            ),
-          ),
+          width: 56, height: 56,
+          decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(16)),
+          child: Center(child: Text(value, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: color))),
         ),
         const SizedBox(height: 8),
-        Text(label, style: const TextStyle(fontSize: 14, color: Colors.grey)),
+        Text(label, style: const TextStyle(fontSize: 14, color: Color(0xFF8D6E63))),
       ],
     );
   }
@@ -582,23 +466,17 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(32),
       decoration: BoxDecoration(
-        color: Colors.grey[50],
+        color: const Color(0xFFFF8C42).withOpacity(0.05),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey[200]!),
+        border: Border.all(color: const Color(0xFFFF8C42).withOpacity(0.15)),
       ),
       child: Column(
         children: [
-          Icon(Icons.notifications_none, size: 64, color: Colors.grey[300]),
+          Icon(Icons.notifications_none, size: 64, color: const Color(0xFFFF8C42).withOpacity(0.4)),
           const SizedBox(height: 16),
-          Text(
-            '还没有提醒',
-            style: TextStyle(fontSize: 18, color: Colors.grey[600]),
-          ),
+          const Text('还没有提醒', style: TextStyle(fontSize: 18, color: Color(0xFF8D6E63))),
           const SizedBox(height: 8),
-          Text(
-            '点击右下角按钮为爸妈添加提醒',
-            style: TextStyle(fontSize: 14, color: Colors.grey[400]),
-          ),
+          const Text('点击右下角按钮为爸妈添加提醒', style: TextStyle(fontSize: 14, color: Color(0xFF8D6E63))),
         ],
       ),
     );
