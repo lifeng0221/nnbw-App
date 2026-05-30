@@ -19,6 +19,8 @@ dependencies:
   
   # 语音
   audioplayers: ^5.2.1
+  speech_to_text: ^7.0.0
+  record: ^5.1.0
   
   # 本地存储
   shared_preferences: ^2.2.2
