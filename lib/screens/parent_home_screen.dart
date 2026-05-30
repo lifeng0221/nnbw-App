@@ -42,7 +42,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
   bool _isLoading = true;
   bool _isRecording = false;
   String _recognizedText = '';
-  String? _currentVoicePath;
+  String? _recognizedVoiceUrl;
   String _partialText = '';
 
   late AnimationController _pulseController;
@@ -112,7 +112,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
   }
 
   Future<void> _startRecording() async {
-    final result = await _voiceService.startRecordingAndListen(
+    final started = await _voiceService.startListening(
       onPartialResult: (text) {
         setState(() => _partialText = text);
       },
@@ -124,7 +124,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       },
     );
 
-    if (result != null) {
+    if (started) {
       setState(() { _isRecording = true; _recordingSeconds = 0; });
       _pulseController.repeat(reverse: true);
       _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -139,16 +139,13 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     _pulseController.stop();
     _pulseController.reset();
 
-    final result = await _voiceService.stopRecording();
+    final text = await _voiceService.stopListening();
 
     setState(() {
       _isRecording = false;
-      if (result['text'] != null && result['text']!.isNotEmpty) {
-        _recognizedText = result['text']!;
-      } else if (_recognizedText.isEmpty) {
-        _recognizedText = '';
+      if (text.isNotEmpty) {
+        _recognizedText = text;
       }
-      _currentVoicePath = result['voicePath'];
       _partialText = '';
     });
 
@@ -190,10 +187,10 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
                 contentPadding: const EdgeInsets.all(16),
               ),
             ),
-            if (_currentVoicePath != null) ...[
+            if (_recognizedVoiceUrl != null) ...[
               const SizedBox(height: 12),
               InkWell(
-                onTap: () => _playVoice(_currentVoicePath!),
+                onTap: () => _playVoice(_recognizedVoiceUrl!),
                 child: Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.05), borderRadius: BorderRadius.circular(10)),
@@ -245,7 +242,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              setState(() { _recognizedText = ''; _tempTime = null; _currentVoicePath = null; });
+              setState(() { _recognizedText = ''; _tempTime = null; _recognizedVoiceUrl = null; });
               _textController.clear();
             },
             child: const Text('取消', style: TextStyle(fontSize: 18, color: AppColors.textSecondary)),
@@ -305,7 +302,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       bindingId: bindings.first.bindingId,
       createdBy: appState.userId!,
       content: text.trim(),
-      voiceUrl: _currentVoicePath,
+      voiceUrl: _recognizedVoiceUrl,
       triggerTime: triggerTime,
       category: '生活',
       priority: 'normal',
@@ -315,7 +312,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
 
     await _storage.saveReminder(reminder);
 
-    setState(() { _recognizedText = ''; _tempTime = null; _currentVoicePath = null; _textController.clear(); });
+    setState(() { _recognizedText = ''; _tempTime = null; _recognizedVoiceUrl = null; _textController.clear(); });
     await _loadReminders();
 
     if (!mounted) return;
