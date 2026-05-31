@@ -86,14 +86,14 @@ class ApiService {
   // ==================== 用户相关 ====================
   
   /// 创建或注册用户（设备登录）
-  /// 后端 POST /users
+  /// 后端 POST /api/users
   Future<Map<String, dynamic>> createUser({
     required String userId,
     required String role,
     String? nickname,
     String? deviceId,
   }) async {
-    return post('/users', {
+    return post('/api/users', {
       'user_id': userId,
       'role': role,
       'nickname': nickname ?? (role == 'parent' ? '老人' : '子女'),
@@ -102,15 +102,15 @@ class ApiService {
   }
   
   /// 获取用户信息
-  /// 后端 GET /users/{user_id}
+  /// 后端 GET /api/users/{user_id}
   Future<Map<String, dynamic>> getUser(String userId) async {
-    return get('/users/$userId');
+    return get('/api/users/$userId');
   }
   
   /// 设备登录（旧版兼容）
-  /// 后端 POST /auth/device_login
+  /// 后端 POST /api/auth/device_login
   Future<Map<String, dynamic>> deviceLogin(String deviceId, String role) async {
-    return post('/auth/device_login', {
+    return post('/api/auth/device_login', {
       'device_id': deviceId,
       'role': role,
     });
@@ -119,48 +119,48 @@ class ApiService {
   // ==================== 绑定相关 ====================
   
   /// 创建绑定关系
-  /// 后端 POST /bindings
+  /// 后端 POST /api/bindings
   Future<Map<String, dynamic>> createBinding({
     required String parentId,
     required String childId,
   }) async {
-    return post('/bindings', {
+    return post('/api/bindings', {
       'parent_id': parentId,
       'child_id': childId,
     });
   }
   
   /// 获取绑定列表
-  /// 后端 GET /bindings?parent_id=xxx 或 ?child_id=xxx
+  /// 后端 GET /api/bindings?parent_id=xxx 或 ?child_id=xxx
   Future<Map<String, dynamic>> getBindings({String? parentId, String? childId}) async {
     final params = <String, String>{};
     if (parentId != null) params['parent_id'] = parentId;
     if (childId != null) params['child_id'] = childId;
-    return get('/bindings', queryParams: params);
+    return get('/api/bindings', queryParams: params);
   }
   
   /// 确认/更新绑定状态
-  /// 后端 PUT /bindings/{binding_id}/status
+  /// 后端 PUT /api/bindings/{binding_id}/status
   Future<Map<String, dynamic>> updateBindingStatus(int bindingId, String status) async {
-    return put('/bindings/$bindingId/status', data: {'status': status});
+    return put('/api/bindings/$bindingId/status', data: {'status': status});
   }
   
   /// 生成配对码（旧版）
-  /// 后端 POST /bind/create_code
+  /// 后端 POST /api/bind/create_code
   Future<Map<String, dynamic>> createPairCode(String parentId) async {
-    return post('/bind/create_code', {'parent_id': parentId});
+    return post('/api/bind/create_code', {'parent_id': parentId});
   }
   
   /// 确认配对码（旧版）
-  /// 后端 POST /bind/confirm
+  /// 后端 POST /api/bind/confirm
   Future<Map<String, dynamic>> confirmPairCode(String pairCode, String childId) async {
-    return post('/bind/confirm', {'code': pairCode, 'child_id': childId});
+    return post('/api/bind/confirm', {'code': pairCode, 'child_id': childId});
   }
   
   // ==================== 提醒相关 ====================
   
   /// 创建提醒
-  /// 后端 POST /reminders
+  /// 后端 POST /api/reminders
   Future<Map<String, dynamic>> createReminder({
     required int bindingId,
     required String createdBy,
@@ -171,7 +171,7 @@ class ApiService {
     String repeatType = 'once',
     String? voiceUrl,
   }) async {
-    return post('/reminders', {
+    return post('/api/reminders', {
       'binding_id': bindingId,
       'created_by': createdBy,
       'content': content,
@@ -184,39 +184,39 @@ class ApiService {
   }
   
   /// 获取提醒列表
-  /// 后端 GET /reminders?binding_id=xxx
+  /// 后端 GET /api/reminders?binding_id=xxx
   Future<Map<String, dynamic>> getReminders(int bindingId) async {
-    return get('/reminders', queryParams: {'binding_id': bindingId.toString()});
+    return get('/api/reminders', queryParams: {'binding_id': bindingId.toString()});
   }
   
   /// 更新提醒状态
-  /// 后端 PUT /reminders/{reminder_id}/status
+  /// 后端 PUT /api/reminders/{reminder_id}/status
   Future<Map<String, dynamic>> updateReminderStatus(int reminderId, String status) async {
-    return put('/reminders/$reminderId/status', data: {'status': status});
+    return put('/api/reminders/$reminderId/status', data: {'status': status});
   }
   
   /// 延后提醒（snooze）
-  /// 后端 PUT /reminders/{reminder_id}/snooze
+  /// 后端 PUT /api/reminders/{reminder_id}/snooze
   Future<Map<String, dynamic>> snoozeReminder(int reminderId, {int minutes = 5}) async {
-    return put('/reminders/$reminderId/snooze', data: {'minutes': minutes});
+    return put('/api/reminders/$reminderId/snooze', data: {'minutes': minutes});
   }
   
   /// 删除提醒
-  /// 后端 DELETE /reminders/{reminder_id}
+  /// 后端 DELETE /api/reminders/{reminder_id}
   Future<Map<String, dynamic>> deleteReminder(int reminderId) async {
-    return delete('/reminders/$reminderId');
+    return delete('/api/reminders/$reminderId');
   }
   
   // ==================== 旧版兼容API ====================
   
   /// 旧版：检查用户提醒
   Future<Map<String, dynamic>> checkReminders(String userId) async {
-    return get('/reminder/check/$userId');
+    return get('/api/reminder/check/$userId');
   }
   
   /// 旧版：即将到来的提醒
   Future<Map<String, dynamic>> getUpcomingReminders(String userId) async {
-    return get('/reminder/upcoming/$userId');
+    return get('/api/reminder/upcoming/$userId');
   }
   
   /// 旧版：自然语言创建提醒
@@ -227,7 +227,7 @@ class ApiService {
     String category = '生活',
     String priority = 'normal',
   }) async {
-    return post('/reminder/parse', {
+    return post('/api/reminder/parse', {
       'binding_id': bindingId,
       'created_by': createdBy,
       'text': text,
