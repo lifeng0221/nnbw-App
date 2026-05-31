@@ -384,8 +384,13 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     _dialogSelectedTime = null; // 重置
     // 智能提取时间：从文字中自动识别"12点""下午3点半"等
     final parsedTime = _parseTimeFromText(displayText);
+    // DEBUG: 打印解析结果
+    debugPrint('=== 时间解析 DEBUG ===');
+    debugPrint('  输入文本: "$displayText"');
+    debugPrint('  解析结果: ${parsedTime != null ? "${parsedTime.hour}:${parsedTime.minute}" : "null"}');
     // 默认：提取到的时间 ?? 5分钟后
     final defaultTime = parsedTime ?? TimeOfDay.fromDateTime(DateTime.now().add(const Duration(minutes: 5)));
+    debugPrint('  最终defaultTime: ${defaultTime.hour}:${defaultTime.minute}');
 
     showDialog(
       context: context,
@@ -414,6 +419,17 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
                   const SizedBox(width: 12),
                   const Text('添加提醒', style: TextStyle(fontSize: 24, color: AppColors.textDark, fontWeight: FontWeight.bold)),
                   const Spacer(),
+                  // DEBUG: 显示解析状态
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: parsedTime != null ? Colors.green.withOpacity(0.1) : Colors.red.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(parsedTime != null ? '✓${parsedTime.hour}:${parsedTime.minute}' : '✗未识别',
+                      style: TextStyle(fontSize: 13, color: parsedTime != null ? Colors.green : Colors.red, fontWeight: FontWeight.bold)),
+                  ),
+                  const SizedBox(width: 4),
                   IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close, size: 28, color: AppColors.textSecondary)),
                 ],
               ),
