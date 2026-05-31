@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 import 'package:intl/intl.dart';
 import '../main.dart';
 import '../models/app_models.dart';
+import '../services/api_service.dart';
 import '../services/local_storage_service.dart';
 import '../widgets/reminder_card.dart';
 import '../widgets/simple_time_picker.dart';
@@ -18,11 +19,14 @@ class ChildHomeScreen extends StatefulWidget {
 
 class _ChildHomeScreenState extends State<ChildHomeScreen> {
   final LocalStorageService _storage = LocalStorageService();
+  final ApiService _apiService = ApiService();
   final TextEditingController _textController = TextEditingController();
   final Uuid _uuid = const Uuid();
 
   List<ReminderModel> _reminders = [];
   bool _isLoading = true;
+  bool _isSyncing = false;
+  int? _serverBindingId; // 后端binding_id（整数）
   String _selectedCategory = '生活';
   String _selectedPriority = 'normal';
   TimeOfDay _selectedTime = TimeOfDay.fromDateTime(DateTime.now().add(const Duration(minutes: 5)));
@@ -37,7 +41,67 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
   ];
 
   @override
-  void initState() { super.initState(); _loadData(); }
+  void initState() { super.initState(); _syncFromServer(); }
+
+  /// 从后端同步数据
+  Future<void> _syncFromServer() async {
+    final appState = context.read<AppState>();
+    if (appState.userId == null) { setState(() => _isLoading = false); return; }
+
+    setState(() => _isSyncing = true);
+    
+    try {
+      // 1. 注册/获取用户
+      await _apiService.createUser(userId: appState.userId!, role: 'child', nickname: appState.nickname);
+      
+      // 2. 拉取绑定关系
+      final bindResp = await _apiService.getBindings(childId: appState.userId!);
+      if (bindResp['success'] == true && bindResp['data'] is List) {
+        for (final j in bindResp['data'] as List) {
+          final binding = BindingModel(
+            bindingId: (j['binding_id'] ?? '').toString(),
+            parentId: j['parent_id'] ?? '',
+            childId: j['child_id'] ?? '',
+            status: j['status'] ?? 'pending',
+            createdAt: j['created_at'] != null ? DateTime.parse(j['created_at']) : DateTime.now(),
+          );
+          await _storage.saveBinding(binding);
+          if (binding.status == 'active' && _serverBindingId == null) {
+            _serverBindingId = j['binding_id'] as int?;
+          }
+        }
+      }
+      
+      // 3. 拉取提醒
+      if (_serverBindingId != null) {
+        final reminderResp = await _apiService.getReminders(_serverBindingId!);
+        if (reminderResp['success'] == true && reminderResp['data'] is List) {
+          for (final j in reminderResp['data'] as List) {
+            final reminder = ReminderModel(
+              reminderId: (j['reminder_id'] ?? '').toString(),
+              bindingId: (j['binding_id'] ?? '').toString(),
+              createdBy: j['created_by'] ?? '',
+              content: j['content'] ?? '',
+              voiceUrl: j['voice_url'],
+              triggerTime: j['trigger_time'] != null ? DateTime.parse(j['trigger_time']) : DateTime.now(),
+              repeatType: j['repeat_type'] ?? 'once',
+              category: j['category'] ?? '生活',
+              priority: j['priority'] ?? 'normal',
+              status: j['status'] ?? 'pending',
+              snoozeCount: j['snooze_count'] ?? 0,
+              createdAt: j['created_at'] != null ? DateTime.parse(j['created_at']) : DateTime.now(),
+            );
+            await _storage.saveReminder(reminder);
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('子女端同步失败: $e');
+    }
+    
+    setState(() => _isSyncing = false);
+    await _loadData();
+  }
 
   Future<void> _loadData() async {
     final appState = context.read<AppState>();
@@ -239,6 +303,18 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
     _textController.clear();
     await _loadData();
 
+    // 异步同步到后端
+    if (_serverBindingId != null) {
+      _apiService.createReminder(
+        bindingId: _serverBindingId!,
+        createdBy: appState.userId!,
+        content: text,
+        triggerTime: triggerTime.toIso8601String(),
+        category: _selectedCategory,
+        priority: _selectedPriority,
+      ).catchError((e) => debugPrint('子女端同步创建失败: $e'));
+    }
+
     if (!mounted) return;
     final timeStr = DateFormat('MM/dd HH:mm').format(triggerTime);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('提醒已添加：$timeStr'), backgroundColor: const Color(0xFF4CAF50)));
@@ -256,7 +332,15 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
         ],
       ),
     );
-    if (confirmed == true) { await _storage.deleteReminder(reminder.reminderId); await _loadData(); }
+    if (confirmed == true) {
+      await _storage.deleteReminder(reminder.reminderId);
+      // 同步后端删除
+      final serverId = int.tryParse(reminder.reminderId);
+      if (serverId != null) {
+        _apiService.deleteReminder(serverId).catchError((e) => debugPrint('同步删除失败: $e'));
+      }
+      await _loadData();
+    }
   }
 
   @override

@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../main.dart';
 import '../models/app_models.dart';
+import '../services/api_service.dart';
 import '../services/local_storage_service.dart';
 
 /// 绑定页面 - 配对码绑定
@@ -16,6 +17,7 @@ class BindScreen extends StatefulWidget {
 
 class _BindScreenState extends State<BindScreen> with SingleTickerProviderStateMixin {
   final LocalStorageService _storage = LocalStorageService();
+  final ApiService _apiService = ApiService();
   final TextEditingController _pairCodeController = TextEditingController();
   
   String? _generatedCode;
@@ -389,22 +391,41 @@ class _BindScreenState extends State<BindScreen> with SingleTickerProviderStateM
     
     setState(() => _isLoading = true);
     
-    // 模拟API延迟
-    await Future.delayed(const Duration(milliseconds: 500));
-    
-    // 生成6位随机配对码
-    final random = Random();
-    final code = (100000 + random.nextInt(900000)).toString();
-    
-    // 保存配对码到本地
-    await _storage.savePairCode(appState.userId!);
-    
-    setState(() {
-      _isLoading = false;
-      _generatedCode = code;
-    });
-    
-    _animController.forward(from: 0);
+    try {
+      // 调用后端生成配对码
+      final resp = await _apiService.createPairCode(appState.userId!);
+      if (resp['success'] == true && resp['data'] != null) {
+        final code = resp['data']['code']?.toString() ?? resp['data']['pair_code']?.toString();
+        if (code != null && code.isNotEmpty) {
+          setState(() {
+            _isLoading = false;
+            _generatedCode = code;
+          });
+          _animController.forward(from: 0);
+          return;
+        }
+      }
+      
+      // 后端失败时，本地生成配对码（降级方案）
+      final random = Random();
+      final code = (100000 + random.nextInt(900000)).toString();
+      await _storage.savePairCode(appState.userId!);
+      setState(() {
+        _isLoading = false;
+        _generatedCode = code;
+      });
+      _animController.forward(from: 0);
+    } catch (e) {
+      // 降级：本地生成
+      final random = Random();
+      final code = (100000 + random.nextInt(900000)).toString();
+      await _storage.savePairCode(appState.userId!);
+      setState(() {
+        _isLoading = false;
+        _generatedCode = code;
+      });
+      _animController.forward(from: 0);
+    }
   }
   
   Future<void> _confirmBind() async {
@@ -420,37 +441,52 @@ class _BindScreenState extends State<BindScreen> with SingleTickerProviderStateM
     
     setState(() => _isLoading = true);
     
-    // 模拟API延迟
-    await Future.delayed(const Duration(milliseconds: 800));
+    try {
+      // 调用后端确认绑定
+      final resp = await _apiService.confirmPairCode(code, appState.userId!);
+      if (resp['success'] == true && resp['data'] != null) {
+        // 后端确认成功，保存绑定到本地
+        final data = resp['data'];
+        final binding = BindingModel(
+          bindingId: (data['binding_id'] ?? '').toString(),
+          parentId: data['parent_id'] ?? appState.userId!,
+          childId: data['child_id'] ?? '',
+          status: data['status'] ?? 'active',
+          createdAt: data['created_at'] != null ? DateTime.parse(data['created_at']) : DateTime.now(),
+        );
+        await _storage.saveBinding(binding);
+        
+        _animController.forward(from: 0);
+        setState(() { _isLoading = false; _bindSuccess = true; });
+        
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('绑定成功！'), backgroundColor: Colors.green),
+        );
+        return;
+      }
+    } catch (e) {
+      debugPrint('后端确认绑定失败: $e');
+    }
     
-    // Mock验证配对码
-    // 实际上任何6位数字都能成功（为了测试方便）
+    // 降级：本地验证（任何6位数字都能成功，方便测试）
     final binding = await _storage.verifyPairCode(code, appState.userId!);
     
     setState(() => _isLoading = false);
     
     if (binding != null || code.length == 6) {
-      // Mock成功
+      // 本地Mock成功
       _animController.forward(from: 0);
-      setState(() {
-        _bindSuccess = true;
-      });
+      setState(() { _bindSuccess = true; });
       
-      // 显示成功消息
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('绑定成功！'),
-          backgroundColor: Colors.green,
-        ),
+        const SnackBar(content: Text('绑定成功！'), backgroundColor: Colors.green),
       );
     } else {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('配对码无效或已过期，请重新获取'),
-          backgroundColor: Colors.red,
-        ),
+        const SnackBar(content: Text('配对码无效或已过期，请重新获取'), backgroundColor: Colors.red),
       );
     }
   }

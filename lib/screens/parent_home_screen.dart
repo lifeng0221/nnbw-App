@@ -6,6 +6,7 @@ import 'package:uuid/uuid.dart';
 import 'package:audioplayers/audioplayers.dart';
 import '../main.dart';
 import '../models/app_models.dart';
+import '../services/api_service.dart';
 import '../services/local_storage_service.dart';
 import '../services/voice_service.dart';
 import '../services/alarm_service.dart';
@@ -37,9 +38,14 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
   final VoiceService _voiceService = VoiceService();
   final LocalStorageService _storage = LocalStorageService();
   final AlarmService _alarmService = AlarmService();
+  final ApiService _apiService = ApiService();
   final TextEditingController _textController = TextEditingController();
   final AudioPlayer _audioPlayer = AudioPlayer();
   final Uuid _uuid = const Uuid();
+  
+  // 同步状态
+  bool _isSyncing = false;
+  int? _serverBindingId; // 后端binding_id（整数）
 
   // Bug 1 修复: 使用GlobalKey控制Scaffold
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
@@ -62,7 +68,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     super.initState();
     _initAnimations();
     _initVoice();
-    _loadReminders();
+    _syncFromServer(); // 首次从后端拉取数据
     _setupAlarmCallback();
     // Bug 7 修复: 前台每10秒刷新一次提醒列表
     _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _loadReminders());
@@ -80,6 +86,75 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       // 铃声响后刷新列表，把状态更新
       _loadReminders();
     };
+  }
+
+  /// 从后端同步数据到本地
+  Future<void> _syncFromServer() async {
+    final appState = context.read<AppState>();
+    if (appState.userId == null) {
+      setState(() => _isLoading = false);
+      return;
+    }
+
+    setState(() => _isSyncing = true);
+    
+    try {
+      // 1. 注册/获取用户
+      final userResp = await _apiService.createUser(
+        userId: appState.userId!,
+        role: 'parent',
+        nickname: appState.nickname,
+      );
+      
+      // 2. 拉取绑定关系
+      final bindResp = await _apiService.getBindings(parentId: appState.userId!);
+      if (bindResp['success'] == true && bindResp['data'] is List) {
+        final bindings = bindResp['data'] as List;
+        for (final j in bindings) {
+          final binding = BindingModel(
+            bindingId: (j['binding_id'] ?? '').toString(),
+            parentId: j['parent_id'] ?? '',
+            childId: j['child_id'] ?? '',
+            status: j['status'] ?? 'pending',
+            createdAt: j['created_at'] != null ? DateTime.parse(j['created_at']) : DateTime.now(),
+          );
+          await _storage.saveBinding(binding);
+          // 记住后端binding_id
+          if (binding.status == 'active' && _serverBindingId == null) {
+            _serverBindingId = j['binding_id'] as int?;
+          }
+        }
+      }
+      
+      // 3. 拉取所有绑定下的提醒
+      if (_serverBindingId != null) {
+        final reminderResp = await _apiService.getReminders(_serverBindingId!);
+        if (reminderResp['success'] == true && reminderResp['data'] is List) {
+          for (final j in reminderResp['data'] as List) {
+            final reminder = ReminderModel(
+              reminderId: (j['reminder_id'] ?? '').toString(),
+              bindingId: (j['binding_id'] ?? '').toString(),
+              createdBy: j['created_by'] ?? '',
+              content: j['content'] ?? '',
+              voiceUrl: j['voice_url'],
+              triggerTime: j['trigger_time'] != null ? DateTime.parse(j['trigger_time']) : DateTime.now(),
+              repeatType: j['repeat_type'] ?? 'once',
+              category: j['category'] ?? '生活',
+              priority: j['priority'] ?? 'normal',
+              status: j['status'] ?? 'pending',
+              snoozeCount: j['snooze_count'] ?? 0,
+              createdAt: j['created_at'] != null ? DateTime.parse(j['created_at']) : DateTime.now(),
+            );
+            await _storage.saveReminder(reminder);
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('同步失败: $e');
+    }
+    
+    setState(() => _isSyncing = false);
+    await _loadReminders();
   }
 
   Future<void> _loadReminders() async {
@@ -383,8 +458,9 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       triggerTime = now.add(const Duration(minutes: 5));
     }
 
+    final reminderId = _uuid.v4();
     final reminder = ReminderModel(
-      reminderId: _uuid.v4(),
+      reminderId: reminderId,
       bindingId: bindings.first.bindingId,
       createdBy: appState.userId!,
       content: text.trim(),
@@ -396,9 +472,30 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       createdAt: DateTime.now(),
     );
 
+    // 先本地保存
     await _storage.saveReminder(reminder);
     setState(() { _recognizedText = ''; _recognizedVoiceUrl = null; _textController.clear(); });
     await _loadReminders();
+
+    // 异步同步到后端
+    if (_serverBindingId != null) {
+      _apiService.createReminder(
+        bindingId: _serverBindingId!,
+        createdBy: appState.userId!,
+        content: text.trim(),
+        triggerTime: triggerTime.toIso8601String(),
+        category: '生活',
+        priority: 'normal',
+      ).then((resp) {
+        if (resp['success'] == true && resp['data'] != null) {
+          // 用后端返回的reminder_id更新本地记录
+          final serverId = resp['data']['reminder_id']?.toString();
+          if (serverId != null && serverId != reminderId) {
+            debugPrint('后端提醒ID: $serverId, 本地ID: $reminderId');
+          }
+        }
+      }).catchError((e) => debugPrint('同步创建提醒失败: $e'));
+    }
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -410,6 +507,8 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
   Future<void> _confirmReminder(ReminderModel r) async {
     await _storage.confirmReminder(r.reminderId);
     await _alarmService.stopAlarmSound();
+    // 同步后端
+    _syncReminderStatus(r, 'confirmed');
     await _loadReminders();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已确认完成'), backgroundColor: AppColors.confirm));
@@ -418,9 +517,24 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
   Future<void> _snoozeReminder(ReminderModel r) async {
     await _storage.snoozeReminder(r.reminderId);
     await _alarmService.stopAlarmSound();
-    await _loadReminders();
+    // 同步后端
+    _syncReminderStatus(r, 'snoozed');
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已延后5分钟提醒'), backgroundColor: AppColors.snooze));
+  }
+
+  /// 同步提醒状态到后端（异步，不阻塞UI）
+  void _syncReminderStatus(ReminderModel r, String status) {
+    // 尝试解析reminderId为整数（后端用整数ID）
+    final serverId = int.tryParse(r.reminderId);
+    if (serverId != null) {
+      if (status == 'snoozed') {
+        _apiService.snoozeReminder(serverId).catchError((e) => debugPrint('同步snooze失败: $e'));
+      } else {
+        _apiService.updateReminderStatus(serverId, status == 'confirmed' ? 'confirmed' : status)
+          .catchError((e) => debugPrint('同步状态失败: $e'));
+      }
+    }
   }
 
   Future<void> _deleteReminder(ReminderModel r) async {
@@ -444,6 +558,11 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     );
     if (confirmed == true) {
       await _storage.deleteReminder(r.reminderId);
+      // 同步后端删除
+      final serverId = int.tryParse(r.reminderId);
+      if (serverId != null) {
+        _apiService.deleteReminder(serverId).catchError((e) => debugPrint('同步删除失败: $e'));
+      }
       await _loadReminders();
     }
   }
