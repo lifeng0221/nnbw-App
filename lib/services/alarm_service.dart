@@ -67,14 +67,14 @@ class AlarmService {
   }
 
   /// Bug 6 修复: 启动定时检查
-  /// 前台每30秒轮询一次，并且立即检查一次过期提醒
+  /// 前台每30秒轮询一次
+  /// 不再立即检查——避免加载时就触发过期提醒显示"已响铃"
   void startChecking(List<ReminderModel> reminders) {
     _reminders = reminders;
     _checkTimer?.cancel();
     _checkTimer = Timer.periodic(const Duration(seconds: 30), (_) => _checkReminders());
-    
-    // Bug 6 修复: 立即检查一次（加载时就检查已过期的pending提醒）
-    _checkReminders();
+    // 不再立即调用_checkReminders()
+    // 只检查未来到期的提醒，过去已过期的由用户手动处理
   }
 
   /// 停止定时检查
@@ -88,10 +88,9 @@ class AlarmService {
     _reminders = reminders;
   }
 
-  /// Bug 6 修复: 轮询检查逻辑改进
-  /// 1. 检查pending状态且triggerTime <= now的提醒
-  /// 2. snoozed状态也检查（Bug 4修复）
-  /// 3. 触发后更新状态为triggered
+  /// 轮询检查逻辑
+  /// 只触发当前轮询周期内到期的提醒（triggerTime在过去30秒到未来之间）
+  /// 避免触发很久以前就应该响的旧提醒
   void _checkReminders() {
     final now = DateTime.now();
     final toTrigger = <ReminderModel>[];
@@ -99,12 +98,10 @@ class AlarmService {
     for (final r in _reminders) {
       // 只处理pending和snoozed状态
       if (r.status == 'pending' || r.status == 'snoozed') {
-        // Bug 6 修复: 如果triggerTime <= now，立即触发
-        if (r.triggerTime.isBefore(now) || r.triggerTime.isAtSameMomentAs(now)) {
-          toTrigger.add(r);
-        }
-        // Bug 6 修复: 宽松判断 - 过去2分钟内的也触发（处理延迟情况）
-        else if (now.difference(r.triggerTime).inMinutes <= 2) {
+        // 只触发：triggerTime在过去60秒到未来之间
+        // 避免触发旧数据（之前因时间解析bug创建的过期提醒）
+        final diff = now.difference(r.triggerTime);
+        if (diff.inSeconds >= 0 && diff.inSeconds <= 60) {
           toTrigger.add(r);
         }
       }

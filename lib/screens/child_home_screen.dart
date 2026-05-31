@@ -34,11 +34,53 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
 
   /// 从文字中智能提取时间（中文自然语言解析）
   /// 支持：12点、下午3点、3点半、半小时后、过一会、一会儿 等
+  /// 中文数字转阿拉伯数字
+  static int _chineseNumToInt(String s) {
+    const map = {'零':0,'一':1,'二':2,'两':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10};
+    s = s.trim();
+    if (s.isEmpty) return -1;
+    final n = int.tryParse(s);
+    if (n != null) return n;
+    if (map.containsKey(s)) return map[s]!;
+    if (s.startsWith('十') && s.length > 1) return 10 + (map[s[1]] ?? 0);
+    if (s.endsWith('十') && s.length > 1) return (map[s[0]] ?? 0) * 10;
+    if (s.contains('十')) {
+      final parts = s.split('十');
+      final tens = parts[0].isEmpty ? 1 : (map[parts[0]] ?? 0);
+      final ones = parts.length > 1 && parts[1].isNotEmpty ? (map[parts[1]] ?? 0) : 0;
+      return tens * 10 + ones;
+    }
+    return -1;
+  }
+
   TimeOfDay? _parseTimeFromText(String text) {
     final now = DateTime.now();
     
+    // 中文数字归一化
+    String normalized = text;
+    normalized = normalized.replaceAllMapped(
+      RegExp(r'([零一二两三四五六七八九十百]+)\s*点'),
+      (m) { final num = _chineseNumToInt(m.group(1)!); return num >= 0 ? '$num点' : m.group(0)!; },
+    );
+    normalized = normalized.replaceAllMapped(
+      RegExp(r'([零一二两三四五六七八九十百]+)\s*点半'),
+      (m) { final num = _chineseNumToInt(m.group(1)!); return num >= 0 ? '$num点半' : m.group(0)!; },
+    );
+    normalized = normalized.replaceAllMapped(
+      RegExp(r'([零一二两三四五六七八九十百]+)\s*点\s*([零一二两三四五六七八九十百]+)\s*分?'),
+      (m) { final h = _chineseNumToInt(m.group(1)!); final min = _chineseNumToInt(m.group(2)!); return (h >= 0 && min >= 0) ? '$h点$min分' : m.group(0)!; },
+    );
+    normalized = normalized.replaceAllMapped(
+      RegExp(r'([零一二两三四五六七八九十百]+)\s*分钟\s*后'),
+      (m) { final num = _chineseNumToInt(m.group(1)!); return num >= 0 ? '$num分钟后' : m.group(0)!; },
+    );
+    normalized = normalized.replaceAllMapped(
+      RegExp(r'([零一二两三四五六七八九十百]+)\s*小时\s*后'),
+      (m) { final num = _chineseNumToInt(m.group(1)!); return num >= 0 ? '$num小时后' : m.group(0)!; },
+    );
+    
     // 1. "X分钟后" / "X分钟后提醒"
-    final minMatch = RegExp(r'(\d+)\s*分钟\s*后').firstMatch(text);
+    final minMatch = RegExp(r'(\d+)\s*分钟\s*后').firstMatch(normalized);
     if (minMatch != null) {
       final mins = int.tryParse(minMatch.group(1) ?? '') ?? 0;
       if (mins > 0 && mins <= 1440) {
@@ -48,7 +90,7 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
     }
     
     // 2. "X小时后"
-    final hourMatch = RegExp(r'(\d+)\s*小时\s*后').firstMatch(text);
+    final hourMatch = RegExp(r'(\d+)\s*小时\s*后').firstMatch(normalized);
     if (hourMatch != null) {
       final hrs = int.tryParse(hourMatch.group(1) ?? '') ?? 0;
       if (hrs > 0 && hrs <= 24) {
@@ -58,21 +100,21 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
     }
     
     // 3. 口语化时间表达
-    if (text.contains('半小时后') || text.contains('半个钟头后') || text.contains('半个钟后')) {
+    if (normalized.contains('半小时后') || normalized.contains('半个钟头后') || normalized.contains('半个钟后')) {
       final target = now.add(const Duration(minutes: 30));
       return TimeOfDay(hour: target.hour, minute: target.minute);
     }
-    if (text.contains('一小时后') || text.contains('一个钟头后') || text.contains('一个钟后') || text.contains('一个小时候')) {
+    if (normalized.contains('一小时后') || normalized.contains('一个钟头后') || normalized.contains('一个钟后') || normalized.contains('一个小时候')) {
       final target = now.add(const Duration(hours: 1));
       return TimeOfDay(hour: target.hour, minute: target.minute);
     }
     // "过一会"/"一会儿"/"一会"/"等会"/"等一下"/"稍后" → 10分钟后
-    if (RegExp(r'过一?(?:会|会儿)|一?会儿|等一?(?:会|下)|稍后|待会').hasMatch(text)) {
+    if (RegExp(r'过一?(?:会|会儿)|一?会儿|等一?(?:会|下)|稍后|待会').hasMatch(normalized)) {
       final target = now.add(const Duration(minutes: 10));
       return TimeOfDay(hour: target.hour, minute: target.minute);
     }
     // "马上"/"立刻"/"赶紧" → 3分钟后
-    if (RegExp(r'马上|立刻|赶紧|即刻|现在就').hasMatch(text)) {
+    if (RegExp(r'马上|立刻|赶紧|即刻|现在就').hasMatch(normalized)) {
       final target = now.add(const Duration(minutes: 3));
       return TimeOfDay(hour: target.hour, minute: target.minute);
     }
@@ -82,12 +124,12 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
     
     // 4. 明确的时间点
     bool isAfternoon = false, isMorning = false, isEvening = false;
-    if (text.contains('下午') || text.contains('午后') || text.contains('pm')) isAfternoon = true;
-    if (text.contains('上午') || text.contains('早上') || text.contains('早晨') || text.contains('上午')) isMorning = true;
-    if (text.contains('晚上') || text.contains('傍晚') || text.contains('夜里') || text.contains('夜晚')) isEvening = true;
+    if (normalized.contains('下午') || normalized.contains('午后') || normalized.contains('pm')) isAfternoon = true;
+    if (normalized.contains('上午') || normalized.contains('早上') || normalized.contains('早晨') || normalized.contains('上午')) isMorning = true;
+    if (normalized.contains('晚上') || normalized.contains('傍晚') || normalized.contains('夜里') || normalized.contains('夜晚')) isEvening = true;
     
     // "X点半"
-    final halfMatch = RegExp(r'(\d+)\s*点半').firstMatch(text);
+    final halfMatch = RegExp(r'(\d+)\s*点半').firstMatch(normalized);
     if (halfMatch != null) {
       var h = int.tryParse(halfMatch.group(1) ?? '') ?? 0;
       if (isAfternoon || isEvening) { if (h < 12) h += 12; }
@@ -96,7 +138,7 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
     }
     
     // "X点XX分" / "X点XX"
-    final hourMinMatch = RegExp(r'(\d+)\s*点\s*(\d+)\s*分?').firstMatch(text);
+    final hourMinMatch = RegExp(r'(\d+)\s*点\s*(\d+)\s*分?').firstMatch(normalized);
     if (hourMinMatch != null) {
       var h = int.tryParse(hourMinMatch.group(1) ?? '') ?? 0;
       final m = int.tryParse(hourMinMatch.group(2) ?? '') ?? 0;
@@ -106,7 +148,7 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
     }
     
     // "X点"
-    final simpleHourMatch = RegExp(r'(?<!\d)(\d{1,2})\s*点(?!\s*[半分\d])').firstMatch(text);
+    final simpleHourMatch = RegExp(r'(?<!\d)(\d{1,2})\s*点(?!\s*[半分\d])').firstMatch(normalized);
     if (simpleHourMatch != null) {
       var h = int.tryParse(simpleHourMatch.group(1) ?? '') ?? -1;
       if (h >= 0 && h <= 24) {
