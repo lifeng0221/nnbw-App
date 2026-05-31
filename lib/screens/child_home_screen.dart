@@ -32,6 +32,93 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
   TimeOfDay _selectedTime = TimeOfDay.fromDateTime(DateTime.now().add(const Duration(minutes: 5)));
   DateTime _selectedDate = DateTime.now();
 
+  /// 从文字中智能提取时间（中文自然语言解析）
+  /// 支持：12点、下午3点、3点半、半小时后、过一会、一会儿 等
+  TimeOfDay? _parseTimeFromText(String text) {
+    final now = DateTime.now();
+    
+    // 1. "X分钟后" / "X分钟后提醒"
+    final minMatch = RegExp(r'(\d+)\s*分钟\s*后').firstMatch(text);
+    if (minMatch != null) {
+      final mins = int.tryParse(minMatch.group(1) ?? '') ?? 0;
+      if (mins > 0 && mins <= 1440) {
+        final target = now.add(Duration(minutes: mins));
+        return TimeOfDay(hour: target.hour, minute: target.minute);
+      }
+    }
+    
+    // 2. "X小时后"
+    final hourMatch = RegExp(r'(\d+)\s*小时\s*后').firstMatch(text);
+    if (hourMatch != null) {
+      final hrs = int.tryParse(hourMatch.group(1) ?? '') ?? 0;
+      if (hrs > 0 && hrs <= 24) {
+        final target = now.add(Duration(hours: hrs));
+        return TimeOfDay(hour: target.hour, minute: target.minute);
+      }
+    }
+    
+    // 3. 口语化时间表达
+    if (text.contains('半小时后') || text.contains('半个钟头后') || text.contains('半个钟后')) {
+      final target = now.add(const Duration(minutes: 30));
+      return TimeOfDay(hour: target.hour, minute: target.minute);
+    }
+    if (text.contains('一小时后') || text.contains('一个钟头后') || text.contains('一个钟后') || text.contains('一个小时候')) {
+      final target = now.add(const Duration(hours: 1));
+      return TimeOfDay(hour: target.hour, minute: target.minute);
+    }
+    // "过一会"/"一会儿"/"一会"/"等会"/"等一下"/"稍后" → 10分钟后
+    if (RegExp(r'过一?(?:会|会儿)|一?会儿|等一?(?:会|下)|稍后|待会').hasMatch(text)) {
+      final target = now.add(const Duration(minutes: 10));
+      return TimeOfDay(hour: target.hour, minute: target.minute);
+    }
+    // "马上"/"立刻"/"赶紧" → 3分钟后
+    if (RegExp(r'马上|立刻|赶紧|即刻|现在就').hasMatch(text)) {
+      final target = now.add(const Duration(minutes: 3));
+      return TimeOfDay(hour: target.hour, minute: target.minute);
+    }
+    // "今天"/"今" 开头+时间 → 今天
+    // "明天"/"明早"/"明晚" → 明天
+    // 这些暂时不处理日期，只提取时间部分
+    
+    // 4. 明确的时间点
+    bool isAfternoon = false, isMorning = false, isEvening = false;
+    if (text.contains('下午') || text.contains('午后') || text.contains('pm')) isAfternoon = true;
+    if (text.contains('上午') || text.contains('早上') || text.contains('早晨') || text.contains('上午')) isMorning = true;
+    if (text.contains('晚上') || text.contains('傍晚') || text.contains('夜里') || text.contains('夜晚')) isEvening = true;
+    
+    // "X点半"
+    final halfMatch = RegExp(r'(\d+)\s*点半').firstMatch(text);
+    if (halfMatch != null) {
+      var h = int.tryParse(halfMatch.group(1) ?? '') ?? 0;
+      if (isAfternoon || isEvening) { if (h < 12) h += 12; }
+      else if (isMorning && h == 12) h = 0;
+      return TimeOfDay(hour: h, minute: 30);
+    }
+    
+    // "X点XX分" / "X点XX"
+    final hourMinMatch = RegExp(r'(\d+)\s*点\s*(\d+)\s*分?').firstMatch(text);
+    if (hourMinMatch != null) {
+      var h = int.tryParse(hourMinMatch.group(1) ?? '') ?? 0;
+      final m = int.tryParse(hourMinMatch.group(2) ?? '') ?? 0;
+      if (isAfternoon || isEvening) { if (h < 12) h += 12; }
+      else if (isMorning && h == 12) h = 0;
+      return TimeOfDay(hour: h, minute: m);
+    }
+    
+    // "X点"
+    final simpleHourMatch = RegExp(r'(?<!\d)(\d{1,2})\s*点(?!\s*[半分\d])').firstMatch(text);
+    if (simpleHourMatch != null) {
+      var h = int.tryParse(simpleHourMatch.group(1) ?? '') ?? -1;
+      if (h >= 0 && h <= 24) {
+        if (isAfternoon || isEvening) { if (h < 12) h += 12; }
+        else if (isMorning && h == 12) h = 0;
+        return TimeOfDay(hour: h, minute: 0);
+      }
+    }
+    
+    return null;
+  }
+
   final List<Map<String, String>> _categories = [
     {'value': '吃药', 'icon': '💊', 'label': '吃药'},
     {'value': '运动', 'icon': '🏃', 'label': '运动'},
@@ -163,12 +250,19 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
                   style: const TextStyle(fontSize: 18, color: Color(0xFF3E2723)),
                   maxLines: 3, autofocus: true,
                   decoration: InputDecoration(
-                    labelText: '提醒内容', hintText: '例如：记得吃药',
+                    labelText: '提醒内容', hintText: '例如：记得吃药，下午3点',
                     labelStyle: const TextStyle(color: Color(0xFFFF8C42)),
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                     focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFFF8C42), width: 2)),
                     contentPadding: const EdgeInsets.all(16),
                   ),
+                  onChanged: (text) {
+                    // 智能提取时间，自动更新选择器
+                    final parsed = _parseTimeFromText(text);
+                    if (parsed != null) {
+                      setModalState(() => _selectedTime = parsed);
+                    }
+                  },
                 ),
                 const SizedBox(height: 20),
 

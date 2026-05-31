@@ -273,11 +273,14 @@ class ApiService {
     // 3. 拉取所有绑定下的提醒
     List<ReminderModel> allReminders = [];
     for (final binding in bindings) {
-      final reminderResp = await getReminders(binding.bindingId);
-      if (reminderResp['success'] == true && reminderResp['data'] is List) {
-        allReminders.addAll(
-          (reminderResp['data'] as List).map((j) => _parseReminder(j)).toList()
-        );
+      final bindId = int.tryParse(binding.bindingId);
+      if (bindId != null) {
+        final reminderResp = await getReminders(bindId);
+        if (reminderResp['success'] == true && reminderResp['data'] is List) {
+          allReminders.addAll(
+            (reminderResp['data'] as List).map((j) => _parseReminder(j)).toList()
+          );
+        }
       }
     }
     result.reminders = allReminders;
