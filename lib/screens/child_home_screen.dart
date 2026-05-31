@@ -58,6 +58,11 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
     
     // 中文数字归一化
     String normalized = text;
+    // 语音识别经常输出 "11.30" 或 "11:30" 格式的时间，转成 "11点30分"
+    normalized = normalized.replaceAllMapped(
+      RegExp(r'(\d{1,2})[.:：](\d{2})'),
+      (m) => '${m.group(1)}点${m.group(2)}分',
+    );
     normalized = normalized.replaceAllMapped(
       RegExp(r'([零一二两三四五六七八九十百]+)\s*点'),
       (m) { final num = _chineseNumToInt(m.group(1)!); return num >= 0 ? '$num点' : m.group(0)!; },

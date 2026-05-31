@@ -252,6 +252,11 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     
     // 先把中文数字替换为阿拉伯数字（保留原文本位置）
     String normalized = text;
+    // 语音识别经常输出 "11.30" 或 "11:30" 格式的时间，转成 "11点30分"
+    normalized = normalized.replaceAllMapped(
+      RegExp(r'(\d{1,2})[.:：](\d{2})'),
+      (m) => '${m.group(1)}点${m.group(2)}分',
+    );
     // 替换 "二十三" "十五" "十" "三" 等出现在"点"前的中文数字
     normalized = normalized.replaceAllMapped(
       RegExp(r'([零一二两三四五六七八九十百]+)\s*点'),
