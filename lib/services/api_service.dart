@@ -131,11 +131,12 @@ class ApiService {
   }
   
   /// 获取绑定列表
-  /// 后端 GET /api/bindings?parent_id=xxx 或 ?child_id=xxx
+  /// 后端 GET /api/bindings?user_id=xxx
   Future<Map<String, dynamic>> getBindings({String? parentId, String? childId}) async {
     final params = <String, String>{};
-    if (parentId != null) params['parent_id'] = parentId;
-    if (childId != null) params['child_id'] = childId;
+    // 后端用user_id参数（不是parent_id/child_id）
+    if (parentId != null) params['user_id'] = parentId;
+    else if (childId != null) params['user_id'] = childId;
     return get('/api/bindings', queryParams: params);
   }
   

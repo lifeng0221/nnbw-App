@@ -79,7 +79,10 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     _pulseAnimation = Tween<double>(begin: 1.0, end: 1.4).animate(CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut));
   }
 
-  Future<void> _initVoice() async => await _voiceService.init();
+  Future<void> _initVoice() async {
+    await _voiceService.init();
+    await _alarmService.init(); // 初始化通知和铃声服务
+  }
 
   void _setupAlarmCallback() {
     _alarmService.onReminderTriggered = (reminder) {
