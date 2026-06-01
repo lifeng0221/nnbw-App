@@ -28,7 +28,12 @@ class AlarmService {
   bool _initialized = false;
 
   Future<void> init() async {
-    if (_initialized) return;
+    if (_initialized) {
+      debugPrint('🟢 AlarmService已初始化，跳过');
+      return;
+    }
+
+    debugPrint('🟢 AlarmService开始初始化...');
 
     // 请求通知权限（Android 13+）
     await _requestNotificationPermission();
@@ -36,10 +41,11 @@ class AlarmService {
     const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
     const iosSettings = DarwinInitializationSettings();
     const settings = InitializationSettings(android: androidSettings, iOS: iosSettings);
-    await _notifications.initialize(
+    final initResult = await _notifications.initialize(
       settings,
       onDidReceiveNotificationResponse: _onNotificationTapped,
     );
+    debugPrint('🟢 通知初始化结果: $initResult');
 
     // 创建通知渠道（高优先级+声音）
     const androidChannel = AndroidNotificationChannel(
@@ -54,6 +60,7 @@ class AlarmService {
         ?.createNotificationChannel(androidChannel);
 
     _initialized = true;
+    debugPrint('🟢 AlarmService初始化完成');
   }
 
   Future<void> _requestNotificationPermission() async {
@@ -72,10 +79,14 @@ class AlarmService {
   /// 启动定时检查 — 每次loadReminders都调用，更新提醒列表
   void startChecking(List<ReminderModel> reminders) {
     _reminders = reminders;
+    debugPrint('🟢 AlarmService: 更新提醒列表，共${reminders.length}条');
     // 只在第一次启动timer，后续只更新数据
     if (_checkTimer == null || !_checkTimer!.isActive) {
       _checkTimer?.cancel();
       _checkTimer = Timer.periodic(const Duration(seconds: 10), (_) => _checkReminders());
+      debugPrint('🟢 AlarmService: 启动10秒轮询');
+      // 立即检查一次
+      _checkReminders();
     }
   }
 
@@ -95,16 +106,24 @@ class AlarmService {
   void _checkReminders() {
     final now = DateTime.now();
     final toTrigger = <ReminderModel>[];
-
+    
+    int pendingCount = 0;
+    int alreadyTriggeredCount = 0;
+    
     for (final r in _reminders) {
       if (r.status != 'pending' && r.status != 'snoozed') continue;
-      if (_triggeredIds.contains(r.reminderId)) continue; // 已触发过，跳过
+      pendingCount++;
+      if (_triggeredIds.contains(r.reminderId)) { alreadyTriggeredCount++; continue; }
       
       // triggerTime已到（当前时间 >= 提醒时间）
       if (!now.isBefore(r.triggerTime)) {
         toTrigger.add(r);
-        _triggeredIds.add(r.reminderId); // 标记已触发
+        _triggeredIds.add(r.reminderId);
       }
+    }
+    
+    if (pendingCount > 0) {
+      debugPrint('🟢 轮询: ${_reminders.length}条提醒, $pendingCount条待响, $alreadyTriggeredCount条已触发, ${toTrigger.length}条即将触发');
     }
 
     // 批量触发
@@ -137,6 +156,7 @@ class AlarmService {
   }
 
   Future<void> showReminderNotification(ReminderModel reminder) async {
+    // 使用默认通知声音（避免RawResource路径问题）
     const androidDetails = AndroidNotificationDetails(
       'reminder_channel', '提醒通知',
       channelDescription: '到点提醒通知',
@@ -144,27 +164,45 @@ class AlarmService {
       priority: Priority.max,
       playSound: true,
       enableVibration: true,
-      sound: RawResourceAndroidNotificationSound('alarm_normal'),
+      // 不指定自定义sound，用渠道默认声音
     );
     const details = NotificationDetails(android: androidDetails, iOS: DarwinNotificationDetails());
-    await _notifications.show(
-      reminder.reminderId.hashCode,
-      '⏰ 念念不忘提醒',
-      reminder.content,
-      details,
-    );
+    try {
+      await _notifications.show(
+        reminder.reminderId.hashCode,
+        '⏰ 念念不忘提醒',
+        reminder.content,
+        details,
+      );
+      debugPrint('🟢 通知已发送: ${reminder.content}');
+    } catch (e) {
+      debugPrint('🔴 通知发送失败: $e');
+    }
   }
 
   /// 播放铃声
   Future<void> playAlarmSound({bool isUrgent = false}) async {
+    debugPrint('🟢 播放铃声: isUrgent=$isUrgent, initialized=$_initialized');
     try {
+      // 先确保audioplayer状态正常
+      await _audioPlayer.stop();
       await _audioPlayer.play(AssetSource('sounds/${isUrgent ? "alarm_urgent" : "alarm_normal"}.mp3'));
+      debugPrint('🟢 铃声播放成功');
     } catch (e) {
-      debugPrint('播放铃声失败: $e');
+      debugPrint('🔴 播放铃声失败: $e');
+      // 尝试播放系统默认声音
       try {
-        await _audioPlayer.play(AssetSource('sounds/alarm_default.mp3'));
+        await _audioPlayer.stop();
+        await _audioPlayer.play(AssetSource('sounds/alarm_normal.mp3'));
+        debugPrint('🟢 备用铃声播放成功');
       } catch (e2) {
-        debugPrint('备用铃声也失败: $e2');
+        debugPrint('🔴 备用铃声也失败: $e2');
+        // 最后尝试播放系统通知声
+        try {
+          await _audioPlayer.play(UrlSource('https://assets.mixkit.co/sfx/preview/286/286-preview.mp3'));
+        } catch (e3) {
+          debugPrint('🔴 所有铃声方案都失败: $e3');
+        }
       }
     }
   }

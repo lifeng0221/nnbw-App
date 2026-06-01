@@ -351,6 +351,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       var h = int.tryParse(halfMatch.group(1) ?? '') ?? 0;
       if (isAfternoon || isEvening) { if (h < 12) h += 12; }
       else if (isMorning && h == 12) h = 0;
+      debugPrint('🔵 时间解析: "$text" -> normalized="$normalized" -> 半点匹配 h=$h:30');
       return TimeOfDay(hour: h, minute: 30);
     }
     
@@ -361,6 +362,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       final m = int.tryParse(hourMinMatch.group(2) ?? '') ?? 0;
       if (isAfternoon || isEvening) { if (h < 12) h += 12; }
       else if (isMorning && h == 12) h = 0;
+      debugPrint('🔵 时间解析: "$text" -> normalized="$normalized" -> 点分匹配 h=$h:m=$m');
       return TimeOfDay(hour: h, minute: m);
     }
     
@@ -372,10 +374,12 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       if (h >= 0 && h <= 24) {
         if (isAfternoon || isEvening) { if (h < 12) h += 12; }
         else if (isMorning && h == 12) h = 0;
+        debugPrint('🔵 时间解析: "$text" -> normalized="$normalized" -> X点匹配 h=$h');
         return TimeOfDay(hour: h, minute: 0);
       }
     }
     
+    debugPrint('🔵 时间解析: "$text" -> normalized="$normalized" -> 未识别');
     return null;
   }
 
@@ -387,6 +391,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     _textController.text = initialText;
     // 初始就尝试解析时间（和子女端一样）
     _dialogSelectedTime = _parseTimeFromText(initialText);
+    debugPrint('🔵 弹窗打开: text="$initialText", parsed=$_dialogSelectedTime');
 
     showDialog(
       context: context,
@@ -398,17 +403,20 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
             final currentText = _textController.text;
             final parsedTime = _parseTimeFromText(currentText);
             final defaultTime = parsedTime ?? TimeOfDay.fromDateTime(DateTime.now().add(const Duration(minutes: 5)));
-            final displayTime = _dialogSelectedTime ?? defaultTime;
+            // 关键：优先用_dialogSelectedTime（用户手动改的），其次用当前解析结果，最后兜底
+            final displayTime = _dialogSelectedTime ?? parsedTime ?? defaultTime;
 
             void handleConfirm() {
               Navigator.pop(dialogContext);
-              // 用解析出的时间（如果用户没手动改，就用自动识别的）
-              _createReminder(_textController.text, _dialogSelectedTime ?? defaultTime);
+              final finalTime = _dialogSelectedTime ?? parsedTime ?? defaultTime;
+              debugPrint('🔵 确认: dialogSelected=$_dialogSelectedTime, parsed=$parsedTime, final=$finalTime');
+              _createReminder(_textController.text, finalTime);
             }
 
             // 文字变化时重新解析（和子女端一样，直接设置时间）
             void onTextChanged(String val) {
               final parsed = _parseTimeFromText(val);
+              debugPrint('🔵 文字变化: "$val" -> parsed=$parsed');
               if (parsed != null) {
                 setDialogState(() => _dialogSelectedTime = parsed);
               }
@@ -533,8 +541,12 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
                           ),
                           const SizedBox(height: 6),
                           Center(child: Text(
-                            _dialogSelectedTime != null ? '已手动设定提醒时间' : (parsedTime != null ? '✓ 已自动识别提醒时间' : '默认5分钟后提醒'),
-                            style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
+                            _dialogSelectedTime != null
+                              ? '✓ 已设定提醒时间 ${_dialogSelectedTime!.hour}:${_dialogSelectedTime!.minute.toString().padLeft(2, "0")}'
+                              : (parsedTime != null
+                                ? '✓ 已自动识别提醒时间 ${parsedTime.hour}:${parsedTime.minute.toString().padLeft(2, "0")}'
+                                : '默认5分钟后提醒'),
+                            style: TextStyle(color: _dialogSelectedTime != null || parsedTime != null ? Colors.green : AppColors.textSecondary, fontSize: 14),
                           )),
                         ],
                       ),
@@ -619,6 +631,8 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     } else {
       triggerTime = now.add(const Duration(minutes: 5));
     }
+    
+    debugPrint('🔵 创建提醒: text="$text", time=$time, triggerTime=$triggerTime, serverBindingId=$_serverBindingId');
 
     final reminderId = _uuid.v4();
     final reminder = ReminderModel(
