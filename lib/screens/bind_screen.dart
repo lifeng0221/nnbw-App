@@ -456,6 +456,20 @@ class _BindScreenState extends State<BindScreen> with SingleTickerProviderStateM
         );
         await _storage.saveBinding(binding);
         
+        // 🔧 v1.0.29: 绑定成功后立即持久化serverBindingId到SharedPreferences
+        // 这是GPT/Google指出的70%根因——绑定ID没持久化，App重启即丢失
+        final serverBid = data['binding_id'];
+        if (serverBid is int) {
+          await _storage.saveServerBindingId(appState.userId!, serverBid);
+          print('🟢 绑定成功: 持久化serverBindingId=$serverBid');
+        } else if (serverBid != null) {
+          final parsed = int.tryParse(serverBid.toString());
+          if (parsed != null) {
+            await _storage.saveServerBindingId(appState.userId!, parsed);
+            print('🟢 绑定成功: 持久化serverBindingId=$parsed');
+          }
+        }
+        
         _animController.forward(from: 0);
         setState(() { _isLoading = false; _bindSuccess = true; });
         

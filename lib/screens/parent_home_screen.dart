@@ -79,24 +79,26 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     _pulseAnimation = Tween<double>(begin: 1.0, end: 1.4).animate(CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut));
   }
 
-  /// 初始化所有服务 — v1.0.28: 每个环节独立try-catch，一个失败不阻塞后续
+  /// 初始化所有服务 — v1.0.29: 本地优先架构
+  /// 启动顺序：恢复binding_id → 加载本地提醒+启动闹钟 → 同步服务器
+  /// 确保即使服务器挂了，本地提醒也能正常响铃
   Future<void> _initServices() async {
-    // 1. 语音服务（失败不阻塞）
+    // Step 1: 语音服务（失败不阻塞）
     try {
       await _voiceService.init();
     } catch (e) {
       print('🔴 语音服务初始化失败（不影响核心功能）: $e');
     }
     
-    // 2. 闹钟服务（失败不阻塞，内部已降级）
+    // Step 2: 闹钟服务（失败不阻塞，内部已降级）
     try {
       await _alarmService.init();
     } catch (e) {
       print('🔴 闹钟服务初始化异常（已降级处理）: $e');
     }
-    _alarmInitialized = true; // 无论成功失败都标记为true，轮询始终可用
+    _alarmInitialized = true;
     
-    // 3. 闹钟回调
+    // Step 3: 闹钟回调
     _alarmService.onDiagnosticUpdate = () {
       if (mounted) setState(() {});
     };
@@ -106,16 +108,39 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     
     print('🟢 长辈端: 服务初始化完成，闹钟诊断=${_alarmService.diagnosticText}');
     
-    // 4. 从服务器同步（失败不阻塞）
+    // Step 4: v1.0.29 核心——先从SharedPreferences恢复serverBindingId
+    // 这是GPT/Google指出的70%根因：App重启后binding_id丢失导致同步全部失效
+    final appState = context.read<AppState>();
+    if (appState.userId != null) {
+      try {
+        final savedBindingId = await _storage.getServerBindingId(appState.userId!);
+        if (savedBindingId != null) {
+          _serverBindingId = savedBindingId;
+          print('🟢 长辈端: 从本地恢复serverBindingId=$_serverBindingId');
+        } else {
+          print('🟡 长辈端: 本地无保存的serverBindingId');
+        }
+      } catch (e) {
+        print('🔴 恢复serverBindingId失败: $e');
+      }
+    }
+    
+    // Step 5: 加载本地提醒+启动闹钟（不依赖服务器）
+    try {
+      await _loadReminders();
+      print('🟢 长辈端: 本地提醒加载完成，${_todayReminders.length}条');
+    } catch (e) {
+      print('🔴 加载本地提醒失败: $e');
+    }
+    
+    // Step 6: 服务器同步（后台刷新，失败不影响本地功能）
     try {
       await _syncFromServer().timeout(const Duration(seconds: 15));
     } catch (e) {
-      print('🔴 服务器同步失败（使用本地数据）: $e');
-      // 同步失败也要加载本地数据
-      await _loadReminders();
+      print('🔴 服务器同步失败（本地提醒仍可用）: $e');
     }
     
-    // 5. 启动定时器
+    // Step 7: 启动定时器
     _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _loadReminders());
     _serverSyncTimer = Timer.periodic(const Duration(seconds: 60), (_) => _syncFromServer());
   }
@@ -161,12 +186,16 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
             final bid = j['binding_id'];
             if (bid is int) {
               _serverBindingId = bid;
-              print('🟢 长辈端: 设置serverBindingId=$_serverBindingId (status=${binding.status})');
+              // 🔧 v1.0.29: 立即持久化到SharedPreferences
+              await _storage.saveServerBindingId(appState.userId!, bid);
+              print('🟢 长辈端: 设置并持久化serverBindingId=$_serverBindingId (status=${binding.status})');
             } else if (bid != null) {
               final parsed = int.tryParse(bid.toString());
               if (parsed != null) {
                 _serverBindingId = parsed;
-                print('🟢 长辈端: 设置serverBindingId=$_serverBindingId (status=${binding.status})');
+                // 🔧 v1.0.29: 立即持久化到SharedPreferences
+                await _storage.saveServerBindingId(appState.userId!, parsed);
+                print('🟢 长辈端: 设置并持久化serverBindingId=$_serverBindingId (status=${binding.status})');
               }
             }
           }

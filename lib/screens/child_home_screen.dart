@@ -228,7 +228,7 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
   }
 
   Future<void> _initServices() async {
-    // v1.0.28: 独立try-catch保护每个环节
+    // v1.0.29: 本地优先架构
     try {
       await _alarmService.init();
     } catch (e) {
@@ -242,12 +242,35 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
       if (mounted) setState(() {});
     };
     
-    // v1.0.28: 服务器同步加超时保护
+    // v1.0.29 核心：先从SharedPreferences恢复serverBindingId
+    final appState = context.read<AppState>();
+    if (appState.userId != null) {
+      try {
+        final savedBindingId = await _storage.getServerBindingId(appState.userId!);
+        if (savedBindingId != null) {
+          _serverBindingId = savedBindingId;
+          print('🟢 子女端: 从本地恢复serverBindingId=$_serverBindingId');
+        } else {
+          print('🟡 子女端: 本地无保存的serverBindingId');
+        }
+      } catch (e) {
+        print('🔴 恢复serverBindingId失败: $e');
+      }
+    }
+    
+    // v1.0.29: 先加载本地数据，不依赖服务器
+    try {
+      await _loadData();
+      print('🟢 子女端: 本地数据加载完成，${_reminders.length}条提醒');
+    } catch (e) {
+      print('🔴 加载本地数据失败: $e');
+    }
+    
+    // 服务器同步（后台刷新，失败不影响本地功能）
     try {
       await _syncFromServer().timeout(const Duration(seconds: 15));
     } catch (e) {
-      print('🔴 服务器同步失败（使用本地数据）: $e');
-      await _loadData();
+      print('🔴 服务器同步失败（本地数据仍可用）: $e');
     }
     
     _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _loadData());
@@ -285,12 +308,16 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
             final bid = j['binding_id'];
             if (bid is int) {
               _serverBindingId = bid;
-              print('🟢 子女端: 设置serverBindingId=$_serverBindingId (status=${binding.status})');
+              // 🔧 v1.0.29: 立即持久化
+              await _storage.saveServerBindingId(appState.userId!, bid);
+              print('🟢 子女端: 设置并持久化serverBindingId=$_serverBindingId (status=${binding.status})');
             } else if (bid != null) {
               final parsed = int.tryParse(bid.toString());
               if (parsed != null) {
                 _serverBindingId = parsed;
-                print('🟢 子女端: 设置serverBindingId=$_serverBindingId (status=${binding.status})');
+                // 🔧 v1.0.29: 立即持久化
+                await _storage.saveServerBindingId(appState.userId!, parsed);
+                print('🟢 子女端: 设置并持久化serverBindingId=$_serverBindingId (status=${binding.status})');
               }
             }
           }

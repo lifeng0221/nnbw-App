@@ -8,6 +8,7 @@ class LocalStorageService {
   static const String _remindersKey = 'reminders';
   static const String _bindingsKey = 'bindings';
   static const String _pairCodesKey = 'pair_codes';
+  static const String _serverBindingIdKey = 'server_binding_id'; // v1.0.29: 持久化serverBindingId
   
   SharedPreferences? _prefs;
   
@@ -16,6 +17,27 @@ class LocalStorageService {
     return _prefs!;
   }
   
+  // ==================== serverBindingId持久化 ====================
+  
+  /// v1.0.29: 持久化serverBindingId到SharedPreferences
+  /// 解决App重启/被杀后binding_id丢失导致同步失败的70%根因问题
+  Future<bool> saveServerBindingId(String userId, int bindingId) async {
+    final prefs = await _preferences;
+    return prefs.setInt('${_serverBindingIdKey}_$userId', bindingId);
+  }
+  
+  /// v1.0.29: 从SharedPreferences恢复serverBindingId
+  Future<int?> getServerBindingId(String userId) async {
+    final prefs = await _preferences;
+    return prefs.getInt('${_serverBindingIdKey}_$userId');
+  }
+  
+  /// v1.0.29: 清除持久化的serverBindingId（解绑时调用）
+  Future<bool> clearServerBindingId(String userId) async {
+    final prefs = await _preferences;
+    return prefs.remove('${_serverBindingIdKey}_$userId');
+  }
+
   // ==================== 提醒相关 ====================
   
   /// 保存提醒到本地
