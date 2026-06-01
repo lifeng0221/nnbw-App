@@ -79,31 +79,45 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     _pulseAnimation = Tween<double>(begin: 1.0, end: 1.4).animate(CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut));
   }
 
-  /// 初始化所有服务（语音+闹钟），确保alarm初始化完成后再加载数据
+  /// 初始化所有服务 — v1.0.28: 每个环节独立try-catch，一个失败不阻塞后续
   Future<void> _initServices() async {
-    await _voiceService.init();
-    await _alarmService.init();
-    _alarmInitialized = true;
-    print('🟢 长辈端: 所有服务初始化完成，开始加载数据');
+    // 1. 语音服务（失败不阻塞）
+    try {
+      await _voiceService.init();
+    } catch (e) {
+      print('🔴 语音服务初始化失败（不影响核心功能）: $e');
+    }
     
-    // 🔧 v1.0.27: 设置闹钟诊断回调
+    // 2. 闹钟服务（失败不阻塞，内部已降级）
+    try {
+      await _alarmService.init();
+    } catch (e) {
+      print('🔴 闹钟服务初始化异常（已降级处理）: $e');
+    }
+    _alarmInitialized = true; // 无论成功失败都标记为true，轮询始终可用
+    
+    // 3. 闹钟回调
     _alarmService.onDiagnosticUpdate = () {
       if (mounted) setState(() {});
     };
-    
-    // 初始化完成后立即同步+加载
-    await _syncFromServer();
-    
-    // 🔧 v1.0.27: 服务初始化完成后才启动定时器
-    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _loadReminders());
-    _serverSyncTimer = Timer.periodic(const Duration(seconds: 60), (_) => _syncFromServer());
-  }
-
-  void _setupAlarmCallback() {
     _alarmService.onReminderTriggered = (reminder) {
-      // 铃声响后刷新列表，把状态更新
       _loadReminders();
     };
+    
+    print('🟢 长辈端: 服务初始化完成，闹钟诊断=${_alarmService.diagnosticText}');
+    
+    // 4. 从服务器同步（失败不阻塞）
+    try {
+      await _syncFromServer().timeout(const Duration(seconds: 15));
+    } catch (e) {
+      print('🔴 服务器同步失败（使用本地数据）: $e');
+      // 同步失败也要加载本地数据
+      await _loadReminders();
+    }
+    
+    // 5. 启动定时器
+    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _loadReminders());
+    _serverSyncTimer = Timer.periodic(const Duration(seconds: 60), (_) => _syncFromServer());
   }
 
   /// 从后端同步数据到本地（每60秒调用一次 + 首次启动）
@@ -1053,31 +1067,34 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     );
   }
 
-  /// 🔧 v1.0.27: 闹钟诊断信息条
+  /// v1.0.28: 闹钟诊断信息条
   Widget _buildDiagnosticBar() {
     final alarm = _alarmService;
-    final isOk = alarm.isInitialized && alarm.isRunning;
-    final color = isOk ? Colors.green : Colors.red;
-    final icon = isOk ? Icons.check_circle : Icons.error;
+    final hasError = !alarm.isInitialized || !alarm.isRunning || alarm.monitoredCount == 0;
+    final color = hasError ? Colors.red : (alarm.notificationReady ? Colors.green : Colors.orange);
+    final icon = hasError ? Icons.error : (alarm.notificationReady ? Icons.check_circle : Icons.warning);
     final text = alarm.diagnosticText;
     
     return GestureDetector(
       onTap: () {
-        // 点击显示详细诊断
         showDialog(context: context, builder: (ctx) => AlertDialog(
           title: const Text('闹钟诊断', style: TextStyle(fontSize: 22)),
-          content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _diagRow('初始化', alarm.isInitialized ? '✅ 已完成' : '❌ 未完成'),
+          content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            _diagRow('轮询初始化', alarm.isInitialized ? '✅ 完成' : '❌ 未完成'),
+            _diagRow('通知插件', alarm.notificationReady ? '✅ 就绪' : '❌ 未就绪'),
             _diagRow('轮询运行', alarm.isRunning ? '✅ 运行中' : '❌ 未启动'),
             _diagRow('监听提醒', '${alarm.monitoredCount}条'),
             _diagRow('待响提醒', '${alarm.pendingCount}条'),
             _diagRow('已触发次数', '${alarm.triggerCount}次'),
             _diagRow('上次检查', alarm.lastCheckTime != null ? alarm.lastCheckTime.toString().substring(11, 19) : '无'),
-            _diagRow('最后结果', alarm.lastCheckResult ?? '无'),
-            _diagRow('serverBindingId', _serverBindingId?.toString() ?? '未获取'),
+            _diagRow('初始化错误', alarm.initError ?? '无'),
+            _diagRow('serverBindingId', _serverBindingId?.toString() ?? '❌ 未获取'),
+            _diagRow('userId', context.read<AppState>().userId ?? '无'),
             const SizedBox(height: 12),
-            const Text('如果"监听提醒"为0，说明提醒数据没有传给闹钟', style: TextStyle(color: Colors.red, fontSize: 14)),
-          ]),
+            const Text('如果"监听提醒"为0：提醒数据没传给闹钟', style: TextStyle(color: Colors.red, fontSize: 14)),
+            const Text('如果"serverBindingId"未获取：未完成绑定，无法同步', style: TextStyle(color: Colors.red, fontSize: 14)),
+            const Text('如果"通知插件"未就绪：到点不会弹通知，但状态会变', style: TextStyle(color: Colors.orange, fontSize: 14)),
+          ])),
           actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭'))],
         ));
       },
