@@ -11,7 +11,9 @@ import 'services/alarm_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await AlarmService().init();
+  // 🔧 v1.0.27: 移除此处的AlarmService.init()
+  // 通知插件需要Flutter引擎完全就绪后才能初始化
+  // 改为在首页initState中初始化
   runApp(
     MultiProvider(
       providers: [
@@ -49,9 +51,19 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> logout() async {
-    userId = null; userRole = null; nickname = null;
+    // 🔧 v1.0.27: 退出登录时保留持久化的角色userId（parent_user_id / child_user_id）
+    // 只清除当前session信息，不删除跨session的持久数据
     final prefs = await SharedPreferences.getInstance();
+    final parentUserId = prefs.getString('parent_user_id');
+    final childUserId = prefs.getString('child_user_id');
+    
+    userId = null; userRole = null; nickname = null;
     await prefs.clear();
+    
+    // 恢复持久化的角色userId
+    if (parentUserId != null) await prefs.setString('parent_user_id', parentUserId);
+    if (childUserId != null) await prefs.setString('child_user_id', childUserId);
+    
     notifyListeners();
   }
 }

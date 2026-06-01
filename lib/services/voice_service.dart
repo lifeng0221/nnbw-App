@@ -17,8 +17,8 @@ class VoiceService {
   /// 初始化语音识别
   Future<bool> init() async {
     _speechAvailable = await _speech.initialize(
-      onError: (error) => debugPrint('语音识别错误: $error'),
-      onStatus: (status) => debugPrint('语音识别状态: $status'),
+      onError: (error) => print('语音识别错误: $error'),
+      onStatus: (status) => print('语音识别状态: $status'),
     );
     return _speechAvailable;
   }
@@ -70,7 +70,7 @@ class VoiceService {
     try {
       await _speech.stop();
     } catch (e) {
-      debugPrint('停止识别失败: $e');
+      print('停止识别失败: $e');
     }
     
     return _lastRecognizedText;
@@ -84,7 +84,7 @@ class VoiceService {
     try {
       await _speech.cancel();
     } catch (e) {
-      debugPrint('取消识别失败: $e');
+      print('取消识别失败: $e');
     }
   }
   

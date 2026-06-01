@@ -69,12 +69,9 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
   void initState() {
     super.initState();
     _initAnimations();
-    _initServices(); // 初始化所有服务（含alarm）
-    _setupAlarmCallback();
-    // 前台每10秒刷新一次提醒列表（本地存储）
-    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _loadReminders());
-    // 每60秒从服务器同步数据（跨设备同步）
-    _serverSyncTimer = Timer.periodic(const Duration(seconds: 60), (_) => _syncFromServer());
+    // 🔧 v1.0.27: 先初始化服务，完成后再启动定时器
+    // 之前的bug：initServices是异步但initState不等它，refreshTimer可能先触发
+    _initServices();
   }
 
   void _initAnimations() {
@@ -87,9 +84,19 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     await _voiceService.init();
     await _alarmService.init();
     _alarmInitialized = true;
-    debugPrint('🟢 长辈端: 所有服务初始化完成，开始加载数据');
+    print('🟢 长辈端: 所有服务初始化完成，开始加载数据');
+    
+    // 🔧 v1.0.27: 设置闹钟诊断回调
+    _alarmService.onDiagnosticUpdate = () {
+      if (mounted) setState(() {});
+    };
+    
     // 初始化完成后立即同步+加载
     await _syncFromServer();
+    
+    // 🔧 v1.0.27: 服务初始化完成后才启动定时器
+    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _loadReminders());
+    _serverSyncTimer = Timer.periodic(const Duration(seconds: 60), (_) => _syncFromServer());
   }
 
   void _setupAlarmCallback() {
@@ -110,7 +117,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     setState(() => _isSyncing = true);
     
     try {
-      debugPrint('🟢 长辈端: 开始从服务器同步...');
+      print('🟢 长辈端: 开始从服务器同步... userId=${appState.userId}');
       
       // 1. 注册/获取用户
       final userResp = await _apiService.createUser(
@@ -118,11 +125,11 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
         role: 'parent',
         nickname: appState.nickname,
       );
-      debugPrint('🟢 长辈端: 用户注册/获取结果: ${userResp['success']}');
+      print('🟢 长辈端: 用户注册/获取结果: ${userResp['success']}');
       
       // 2. 拉取绑定关系
       final bindResp = await _apiService.getBindings(parentId: appState.userId!);
-      debugPrint('🟢 长辈端: 绑定查询结果: ${bindResp['success']}, data=${bindResp['data']}');
+      print('🟢 长辈端: 绑定查询结果: success=${bindResp['success']}, data=${bindResp['data']}');
       if (bindResp['success'] == true && bindResp['data'] is List) {
         final bindings = bindResp['data'] as List;
         for (final j in bindings) {
@@ -134,23 +141,32 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
             createdAt: j['created_at'] != null ? DateTime.parse(j['created_at']) : DateTime.now(),
           );
           await _storage.saveBinding(binding);
-          // 记住后端binding_id（整数）
-          if (binding.status == 'active' && _serverBindingId == null) {
-            _serverBindingId = j['binding_id'] as int?;
-            debugPrint('🟢 长辈端: 设置serverBindingId=$_serverBindingId');
+          // 🔧 v1.0.27: 正确获取serverBindingId
+          // 只取active状态的绑定，取binding_id（整数）
+          if (binding.status == 'active' || binding.status == 'pending') {
+            final bid = j['binding_id'];
+            if (bid is int) {
+              _serverBindingId = bid;
+              print('🟢 长辈端: 设置serverBindingId=$_serverBindingId (status=${binding.status})');
+            } else if (bid != null) {
+              final parsed = int.tryParse(bid.toString());
+              if (parsed != null) {
+                _serverBindingId = parsed;
+                print('🟢 长辈端: 设置serverBindingId=$_serverBindingId (status=${binding.status})');
+              }
+            }
           }
         }
       }
       
-      // 3. 拉取所有绑定下的提醒（覆盖式同步：服务器为准）
+      // 3. 拉取所有绑定下的提醒
       if (_serverBindingId != null) {
         final reminderResp = await _apiService.getReminders(_serverBindingId!);
-        debugPrint('🟢 长辈端: 提醒查询结果: ${reminderResp['success']}, data=${reminderResp['data']}');
+        print('🟢 长辈端: 提醒查询结果: success=${reminderResp['success']}, data=${reminderResp['data']}');
         if (reminderResp['success'] == true && reminderResp['data'] is List) {
           final serverReminders = reminderResp['data'] as List;
           for (final j in serverReminders) {
             final serverId = (j['reminder_id'] ?? '').toString();
-            // 检查本地是否已有此提醒（按serverId匹配）
             final localReminder = await _storage.getReminderById(serverId);
             if (localReminder == null) {
               // 新提醒：从服务器来的，保存到本地
@@ -169,19 +185,18 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
                 createdAt: j['created_at'] != null ? DateTime.parse(j['created_at']) : DateTime.now(),
               );
               await _storage.saveReminder(reminder);
-              debugPrint('🟢 长辈端: 从服务器同步新提醒: ${reminder.content} (${reminder.formattedTime})');
+              print('🟢 长辈端: 从服务器同步新提醒: ${reminder.content} (${reminder.formattedTime})');
             } else if (localReminder.status == 'pending' && j['status'] != 'pending') {
-              // 本地还是pending但服务器已更新状态，同步过来
               await _storage.updateReminderStatus(serverId, j['status']?.toString() ?? 'pending');
-              debugPrint('🟢 长辈端: 从服务器同步状态更新: $serverId -> ${j['status']}');
+              print('🟢 长辈端: 从服务器同步状态更新: $serverId -> ${j['status']}');
             }
           }
         }
       } else {
-        debugPrint('🟡 长辈端: 没有serverBindingId，无法从服务器同步提醒（可能尚未绑定）');
+        print('🟡 长辈端: 没有serverBindingId，无法从服务器同步提醒（尚未绑定子女）');
       }
     } catch (e) {
-      debugPrint('🔴 长辈端同步失败: $e');
+      print('🔴 长辈端同步失败: $e');
     }
     
     setState(() => _isSyncing = false);
@@ -226,7 +241,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     // 显示所有提醒（不限于今天），避免刚创建的提醒因时间过了被过滤掉看不到
     allReminders.sort((a, b) => a.triggerTime.compareTo(b.triggerTime));
     
-    debugPrint('🔵 加载提醒: ${bindings.length}个绑定, ${allReminders.length}条提醒');
+    print('🔵 加载提醒: ${bindings.length}个绑定, ${allReminders.length}条提醒');
 
     setState(() { _todayReminders = allReminders; _isLoading = false; });
 
@@ -305,7 +320,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       if (hVal > 0) {
         int totalMin = hVal * 60 + (isHalf ? 30 : 0) - 15; // 一刻=15分钟
         if (totalMin < 0) totalMin += 24 * 60;
-        debugPrint('🔵 时间解析: "$text" -> 差一刻Y点 h=$hVal half=$isHalf -> ${totalMin ~/ 60 % 24}:${totalMin % 60}');
+        print('🔵 时间解析: "$text" -> 差一刻Y点 h=$hVal half=$isHalf -> ${totalMin ~/ 60 % 24}:${totalMin % 60}');
         return TimeOfDay(hour: totalMin ~/ 60 % 24, minute: totalMin % 60);
       }
     }
@@ -317,7 +332,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       if (mVal > 0 && hVal > 0) {
         int totalMin = hVal * 60 + (isHalf ? 30 : 0) - mVal;
         if (totalMin < 0) totalMin += 24 * 60;
-        debugPrint('🔵 时间解析: "$text" -> 差X分Y点 h=$hVal m=$mVal half=$isHalf -> ${totalMin ~/ 60 % 24}:${totalMin % 60}');
+        print('🔵 时间解析: "$text" -> 差X分Y点 h=$hVal m=$mVal half=$isHalf -> ${totalMin ~/ 60 % 24}:${totalMin % 60}');
         return TimeOfDay(hour: totalMin ~/ 60 % 24, minute: totalMin % 60);
       }
     }
@@ -417,7 +432,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       var h = int.tryParse(halfMatch.group(1) ?? '') ?? 0;
       if (isAfternoon || isEvening) { if (h < 12) h += 12; }
       else if (isMorning && h == 12) h = 0;
-      debugPrint('🔵 时间解析: "$text" -> normalized="$normalized" -> 半点匹配 h=$h:30');
+      print('🔵 时间解析: "$text" -> normalized="$normalized" -> 半点匹配 h=$h:30');
       return TimeOfDay(hour: h, minute: 30);
     }
     
@@ -428,7 +443,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       final kemu = kemuMatch.group(2) == '一' ? 15 : 45;
       if (isAfternoon || isEvening) { if (h < 12) h += 12; }
       else if (isMorning && h == 12) h = 0;
-      debugPrint('🔵 时间解析: "$text" -> X点一刻/三刻匹配 h=$h:m=$kemu');
+      print('🔵 时间解析: "$text" -> X点一刻/三刻匹配 h=$h:m=$kemu');
       return TimeOfDay(hour: h, minute: kemu);
     }
     
@@ -439,7 +454,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       final m = int.tryParse(hourMinMatch.group(2) ?? '') ?? 0;
       if (isAfternoon || isEvening) { if (h < 12) h += 12; }
       else if (isMorning && h == 12) h = 0;
-      debugPrint('🔵 时间解析: "$text" -> normalized="$normalized" -> 点分匹配 h=$h:m=$m');
+      print('🔵 时间解析: "$text" -> normalized="$normalized" -> 点分匹配 h=$h:m=$m');
       return TimeOfDay(hour: h, minute: m);
     }
     
@@ -451,12 +466,12 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       if (h >= 0 && h <= 24) {
         if (isAfternoon || isEvening) { if (h < 12) h += 12; }
         else if (isMorning && h == 12) h = 0;
-        debugPrint('🔵 时间解析: "$text" -> normalized="$normalized" -> X点匹配 h=$h');
+        print('🔵 时间解析: "$text" -> normalized="$normalized" -> X点匹配 h=$h');
         return TimeOfDay(hour: h, minute: 0);
       }
     }
     
-    debugPrint('🔵 时间解析: "$text" -> normalized="$normalized" -> 未识别');
+    print('🔵 时间解析: "$text" -> normalized="$normalized" -> 未识别');
     return null;
   }
 
@@ -468,7 +483,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     _textController.text = initialText;
     // 初始就尝试解析时间（和子女端一样）
     _dialogSelectedTime = _parseTimeFromText(initialText);
-    debugPrint('🔵 弹窗打开: text="$initialText", parsed=$_dialogSelectedTime');
+    print('🔵 弹窗打开: text="$initialText", parsed=$_dialogSelectedTime');
 
     showDialog(
       context: context,
@@ -486,14 +501,14 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
             void handleConfirm() {
               Navigator.pop(dialogContext);
               final finalTime = _dialogSelectedTime ?? parsedTime ?? defaultTime;
-              debugPrint('🔵 确认: dialogSelected=$_dialogSelectedTime, parsed=$parsedTime, final=$finalTime');
+              print('🔵 确认: dialogSelected=$_dialogSelectedTime, parsed=$parsedTime, final=$finalTime');
               _createReminder(_textController.text, finalTime);
             }
 
             // 文字变化时重新解析（和子女端一样，直接设置时间）
             void onTextChanged(String val) {
               final parsed = _parseTimeFromText(val);
-              debugPrint('🔵 文字变化: "$val" -> parsed=$parsed');
+              print('🔵 文字变化: "$val" -> parsed=$parsed');
               if (parsed != null) {
                 setDialogState(() => _dialogSelectedTime = parsed);
               }
@@ -709,7 +724,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       triggerTime = now.add(const Duration(minutes: 5));
     }
     
-    debugPrint('🔵 创建提醒: text="$text", time=$time, triggerTime=$triggerTime, serverBindingId=$_serverBindingId');
+    print('🔵 创建提醒: text="$text", time=$time, triggerTime=$triggerTime, serverBindingId=$_serverBindingId');
 
     final reminderId = _uuid.v4();
     final reminder = ReminderModel(
@@ -744,10 +759,10 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
           // 用后端返回的reminder_id更新本地记录
           final serverId = resp['data']['reminder_id']?.toString();
           if (serverId != null && serverId != reminderId) {
-            debugPrint('后端提醒ID: $serverId, 本地ID: $reminderId');
+            print('后端提醒ID: $serverId, 本地ID: $reminderId');
           }
         }
-      }).catchError((e) => debugPrint('同步创建提醒失败: $e'));
+      }).catchError((e) => print('同步创建提醒失败: $e'));
     }
 
     if (!mounted) return;
@@ -784,10 +799,10 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     final serverId = int.tryParse(r.reminderId);
     if (serverId != null) {
       if (status == 'snoozed') {
-        _apiService.snoozeReminder(serverId).catchError((e) => debugPrint('同步snooze失败: $e'));
+        _apiService.snoozeReminder(serverId).catchError((e) => print('同步snooze失败: $e'));
       } else {
         _apiService.updateReminderStatus(serverId, status == 'confirmed' ? 'confirmed' : status)
-          .catchError((e) => debugPrint('同步状态失败: $e'));
+          .catchError((e) => print('同步状态失败: $e'));
       }
     }
   }
@@ -816,7 +831,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       // 同步后端删除
       final serverId = int.tryParse(r.reminderId);
       if (serverId != null) {
-        _apiService.deleteReminder(serverId).catchError((e) => debugPrint('同步删除失败: $e'));
+        _apiService.deleteReminder(serverId).catchError((e) => print('同步删除失败: $e'));
       }
       await _loadReminders();
     }
@@ -969,12 +984,21 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
         ),
         actions: [
           IconButton(icon: const Icon(Icons.link, color: AppColors.primary), tooltip: '绑定子女',
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BindScreen()))),
+            onPressed: () async {
+              final result = await Navigator.push(context, MaterialPageRoute(builder: (_) => const BindScreen()));
+              // 🔧 v1.0.27: 绑定页面返回后，立即重新同步
+              if (result == true) {
+                print('🟢 长辈端: 绑定成功返回，重新同步');
+                await _syncFromServer();
+              }
+            }),
         ],
       ),
       // 侧滑菜单
       drawer: _buildDrawer(),
       body: Column(children: [
+        // 🔧 v1.0.27: 闹钟诊断信息条（点击可展开详情）
+        _buildDiagnosticBar(),
         // 今日提醒统计条
         Container(
           width: double.infinity, padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
@@ -1029,6 +1053,58 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     );
   }
 
+  /// 🔧 v1.0.27: 闹钟诊断信息条
+  Widget _buildDiagnosticBar() {
+    final alarm = _alarmService;
+    final isOk = alarm.isInitialized && alarm.isRunning;
+    final color = isOk ? Colors.green : Colors.red;
+    final icon = isOk ? Icons.check_circle : Icons.error;
+    final text = alarm.diagnosticText;
+    
+    return GestureDetector(
+      onTap: () {
+        // 点击显示详细诊断
+        showDialog(context: context, builder: (ctx) => AlertDialog(
+          title: const Text('闹钟诊断', style: TextStyle(fontSize: 22)),
+          content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            _diagRow('初始化', alarm.isInitialized ? '✅ 已完成' : '❌ 未完成'),
+            _diagRow('轮询运行', alarm.isRunning ? '✅ 运行中' : '❌ 未启动'),
+            _diagRow('监听提醒', '${alarm.monitoredCount}条'),
+            _diagRow('待响提醒', '${alarm.pendingCount}条'),
+            _diagRow('已触发次数', '${alarm.triggerCount}次'),
+            _diagRow('上次检查', alarm.lastCheckTime != null ? alarm.lastCheckTime.toString().substring(11, 19) : '无'),
+            _diagRow('最后结果', alarm.lastCheckResult ?? '无'),
+            _diagRow('serverBindingId', _serverBindingId?.toString() ?? '未获取'),
+            const SizedBox(height: 12),
+            const Text('如果"监听提醒"为0，说明提醒数据没有传给闹钟', style: TextStyle(color: Colors.red, fontSize: 14)),
+          ]),
+          actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭'))],
+        ));
+      },
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        decoration: BoxDecoration(color: color.withOpacity(0.1), border: Border(bottom: BorderSide(color: color.withOpacity(0.3)))),
+        child: Row(children: [
+          Icon(icon, color: color, size: 16),
+          const SizedBox(width: 8),
+          Expanded(child: Text(text, style: TextStyle(fontSize: 12, color: color), overflow: TextOverflow.ellipsis)),
+          Icon(Icons.info_outline, color: color.withOpacity(0.5), size: 14),
+        ]),
+      ),
+    );
+  }
+  
+  Widget _diagRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(children: [
+        SizedBox(width: 100, child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15))),
+        Expanded(child: Text(value, style: const TextStyle(fontSize: 15))),
+      ]),
+    );
+  }
+
   /// 侧滑菜单
   Widget _buildDrawer() {
     final appState = context.read<AppState>();
@@ -1048,7 +1124,14 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
           ListTile(
             leading: const Icon(Icons.link, color: AppColors.primary),
             title: const Text('绑定子女', style: TextStyle(fontSize: 18)),
-            onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (_) => const BindScreen())); },
+            onTap: () async {
+              Navigator.pop(context);
+              final result = await Navigator.push(context, MaterialPageRoute(builder: (_) => const BindScreen()));
+              if (result == true) {
+                print('🟢 长辈端: 绑定成功返回，重新同步');
+                await _syncFromServer();
+              }
+            },
           ),
           ListTile(
             leading: const Icon(Icons.volume_up, color: AppColors.primary),

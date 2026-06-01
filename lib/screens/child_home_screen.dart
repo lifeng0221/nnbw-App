@@ -223,10 +223,8 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
   @override
   void initState() {
     super.initState();
+    // 🔧 v1.0.27: 先初始化服务，完成后再启动定时器
     _initServices();
-    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _loadData());
-    // 每60秒从服务器同步数据（跨设备同步）
-    _serverSyncTimer = Timer.periodic(const Duration(seconds: 60), (_) => _syncFromServer());
   }
 
   Future<void> _initServices() async {
@@ -234,6 +232,14 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
     _alarmService.onReminderTriggered = (reminder) {
       _loadData();
     };
+    // 🔧 v1.0.27: 设置诊断回调
+    _alarmService.onDiagnosticUpdate = () {
+      if (mounted) setState(() {});
+    };
+    
+    // 🔧 v1.0.27: 服务初始化完成后才启动定时器
+    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _loadData());
+    _serverSyncTimer = Timer.periodic(const Duration(seconds: 60), (_) => _syncFromServer());
   }
 
   /// 从后端同步数据（每60秒调用一次 + 首次启动）
@@ -244,14 +250,14 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
     setState(() => _isSyncing = true);
     
     try {
-      debugPrint('🟢 子女端: 开始从服务器同步...');
+      print('🟢 子女端: 开始从服务器同步... userId=${appState.userId}');
       
       // 1. 注册/获取用户
       await _apiService.createUser(userId: appState.userId!, role: 'child', nickname: appState.nickname);
       
       // 2. 拉取绑定关系
       final bindResp = await _apiService.getBindings(childId: appState.userId!);
-      debugPrint('🟢 子女端: 绑定查询结果: ${bindResp['success']}, data=${bindResp['data']}');
+      print('🟢 子女端: 绑定查询结果: success=${bindResp['success']}, data=${bindResp['data']}');
       if (bindResp['success'] == true && bindResp['data'] is List) {
         for (final j in bindResp['data'] as List) {
           final binding = BindingModel(
@@ -262,9 +268,19 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
             createdAt: j['created_at'] != null ? DateTime.parse(j['created_at']) : DateTime.now(),
           );
           await _storage.saveBinding(binding);
-          if (binding.status == 'active' && _serverBindingId == null) {
-            _serverBindingId = j['binding_id'] as int?;
-            debugPrint('🟢 子女端: 设置serverBindingId=$_serverBindingId');
+          // 🔧 v1.0.27: 正确获取serverBindingId
+          if (binding.status == 'active' || binding.status == 'pending') {
+            final bid = j['binding_id'];
+            if (bid is int) {
+              _serverBindingId = bid;
+              print('🟢 子女端: 设置serverBindingId=$_serverBindingId (status=${binding.status})');
+            } else if (bid != null) {
+              final parsed = int.tryParse(bid.toString());
+              if (parsed != null) {
+                _serverBindingId = parsed;
+                print('🟢 子女端: 设置serverBindingId=$_serverBindingId (status=${binding.status})');
+              }
+            }
           }
         }
       }
@@ -272,7 +288,7 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
       // 3. 拉取提醒（增量同步）
       if (_serverBindingId != null) {
         final reminderResp = await _apiService.getReminders(_serverBindingId!);
-        debugPrint('🟢 子女端: 提醒查询结果: ${reminderResp['success']}, data=${reminderResp['data']}');
+        print('🟢 子女端: 提醒查询结果: success=${reminderResp['success']}, data=${reminderResp['data']}');
         if (reminderResp['success'] == true && reminderResp['data'] is List) {
           final serverReminders = reminderResp['data'] as List;
           for (final j in serverReminders) {
@@ -295,18 +311,18 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
                 createdAt: j['created_at'] != null ? DateTime.parse(j['created_at']) : DateTime.now(),
               );
               await _storage.saveReminder(reminder);
-              debugPrint('🟢 子女端: 从服务器同步新提醒: ${reminder.content} (${reminder.formattedTime})');
+              print('🟢 子女端: 从服务器同步新提醒: ${reminder.content} (${reminder.formattedTime})');
             } else if (localReminder.status == 'pending' && j['status'] != 'pending') {
               await _storage.updateReminderStatus(serverId, j['status']?.toString() ?? 'pending');
-              debugPrint('🟢 子女端: 从服务器同步状态更新: $serverId -> ${j['status']}');
+              print('🟢 子女端: 从服务器同步状态更新: $serverId -> ${j['status']}');
             }
           }
         }
       } else {
-        debugPrint('🟡 子女端: 没有serverBindingId，无法从服务器同步提醒（可能尚未绑定）');
+        print('🟡 子女端: 没有serverBindingId，无法从服务器同步提醒（尚未绑定）');
       }
     } catch (e) {
-      debugPrint('🔴 子女端同步失败: $e');
+      print('🔴 子女端同步失败: $e');
     }
     
     setState(() => _isSyncing = false);
@@ -546,7 +562,7 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
         triggerTime: triggerTime.toIso8601String(),
         category: _selectedCategory,
         priority: _selectedPriority,
-      ).catchError((e) => debugPrint('子女端同步创建失败: $e'));
+      ).catchError((e) => print('子女端同步创建失败: $e'));
     }
 
     if (!mounted) return;
@@ -571,7 +587,7 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
       // 同步后端删除
       final serverId = int.tryParse(reminder.reminderId);
       if (serverId != null) {
-        _apiService.deleteReminder(serverId).catchError((e) => debugPrint('同步删除失败: $e'));
+        _apiService.deleteReminder(serverId).catchError((e) => print('同步删除失败: $e'));
       }
       await _loadData();
     }
@@ -587,7 +603,14 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
         iconTheme: const IconThemeData(color: Color(0xFF3E2723)),
         actions: [
           IconButton(icon: const Icon(Icons.link, color: Color(0xFFFF8C42)), tooltip: '生成配对码',
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BindScreen()))),
+            onPressed: () async {
+              final result = await Navigator.push(context, MaterialPageRoute(builder: (_) => const BindScreen()));
+              // 🔧 v1.0.27: 绑定页面返回后，立即重新同步
+              if (result == true) {
+                print('🟢 子女端: 绑定成功返回，重新同步');
+                await _syncFromServer();
+              }
+            }),
         ],
       ),
       body: _isLoading
@@ -597,6 +620,8 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
             child: SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(), padding: const EdgeInsets.all(16),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                // 🔧 v1.0.27: 闹钟诊断条
+                _buildDiagnosticBar(),
                 _buildParentStatusCard(),
                 const SizedBox(height: 24),
                 Row(children: [
@@ -620,6 +645,56 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
         onPressed: _showCreateReminderSheet, icon: const Icon(Icons.add), label: const Text('设提醒'),
         backgroundColor: const Color(0xFFFF8C42), foregroundColor: Colors.white,
       ),
+    );
+  }
+
+  /// 🔧 v1.0.27: 闹钟诊断信息条
+  Widget _buildDiagnosticBar() {
+    final alarm = _alarmService;
+    final isOk = alarm.isInitialized && alarm.isRunning;
+    final color = isOk ? Colors.green : Colors.red;
+    final icon = isOk ? Icons.check_circle : Icons.error;
+    final text = alarm.diagnosticText;
+    
+    return GestureDetector(
+      onTap: () {
+        showDialog(context: context, builder: (ctx) => AlertDialog(
+          title: const Text('闹钟诊断', style: TextStyle(fontSize: 22)),
+          content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            _diagRow('初始化', alarm.isInitialized ? '✅ 已完成' : '❌ 未完成'),
+            _diagRow('轮询运行', alarm.isRunning ? '✅ 运行中' : '❌ 未启动'),
+            _diagRow('监听提醒', '${alarm.monitoredCount}条'),
+            _diagRow('待响提醒', '${alarm.pendingCount}条'),
+            _diagRow('已触发次数', '${alarm.triggerCount}次'),
+            _diagRow('上次检查', alarm.lastCheckTime != null ? alarm.lastCheckTime.toString().substring(11, 19) : '无'),
+            _diagRow('最后结果', alarm.lastCheckResult ?? '无'),
+            _diagRow('serverBindingId', _serverBindingId?.toString() ?? '未获取'),
+          ]),
+          actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭'))],
+        ));
+      },
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        margin: const EdgeInsets.only(bottom: 12),
+        decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+        child: Row(children: [
+          Icon(icon, color: color, size: 16),
+          const SizedBox(width: 8),
+          Expanded(child: Text(text, style: TextStyle(fontSize: 12, color: color), overflow: TextOverflow.ellipsis)),
+          Icon(Icons.info_outline, color: color.withOpacity(0.5), size: 14),
+        ]),
+      ),
+    );
+  }
+  
+  Widget _diagRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(children: [
+        SizedBox(width: 100, child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15))),
+        Expanded(child: Text(value, style: const TextStyle(fontSize: 15))),
+      ]),
     );
   }
 

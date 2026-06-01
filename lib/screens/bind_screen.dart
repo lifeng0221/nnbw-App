@@ -463,10 +463,15 @@ class _BindScreenState extends State<BindScreen> with SingleTickerProviderStateM
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('绑定成功！'), backgroundColor: Colors.green),
         );
+        
+        // 🔧 v1.0.27: 绑定成功后，等1秒自动返回首页（首页会自动同步）
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted) Navigator.pop(context, true); // 返回true表示绑定成功
+        });
         return;
       }
     } catch (e) {
-      debugPrint('后端确认绑定失败: $e');
+      print('后端确认绑定失败: $e');
     }
     
     // 降级：本地验证（任何6位数字都能成功，方便测试）
@@ -477,12 +482,17 @@ class _BindScreenState extends State<BindScreen> with SingleTickerProviderStateM
     if (binding != null || code.length == 6) {
       // 本地Mock成功
       _animController.forward(from: 0);
-      setState(() { _bindSuccess = true; });
+      setState(() { _isLoading = false; _bindSuccess = true; });
       
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('绑定成功！'), backgroundColor: Colors.green),
+        const SnackBar(content: Text('绑定成功！（本地模式）'), backgroundColor: Colors.green),
       );
+      
+      // 🔧 v1.0.27: 绑定成功后自动返回
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) Navigator.pop(context, true);
+      });
     } else {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../main.dart';
 import 'parent_home_screen.dart';
 import 'child_home_screen.dart';
@@ -165,8 +166,21 @@ class _LoginScreenState extends State<LoginScreen> {
     final appState = context.read<AppState>();
     await Future.delayed(const Duration(milliseconds: 500));
     
-    final mockUserId = 'user_${DateTime.now().millisecondsSinceEpoch}';
-    await appState.setUser(mockUserId, _selectedRole, _selectedRole == 'parent' ? '长辈' : '子女');
+    // 🔧 v1.0.27 关键修复：持久化userId，确保同一设备同一角色每次登录ID一致
+    // 之前每次登录生成新userId，导致绑定关系和提醒数据全部丢失
+    final prefs = await SharedPreferences.getInstance();
+    final roleKey = '${_selectedRole}_user_id';
+    var userId = prefs.getString(roleKey);
+    if (userId == null) {
+      // 首次登录：生成固定ID并持久化
+      userId = '${_selectedRole}_${DateTime.now().millisecondsSinceEpoch}';
+      await prefs.setString(roleKey, userId);
+      print('🟢 首次登录: 生成持久化userId=$userId, role=$_selectedRole');
+    } else {
+      print('🟢 再次登录: 使用已有userId=$userId, role=$_selectedRole');
+    }
+    
+    await appState.setUser(userId, _selectedRole, _selectedRole == 'parent' ? '长辈' : '子女');
     
     setState(() => _isLoading = false);
     
