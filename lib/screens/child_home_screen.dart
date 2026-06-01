@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
@@ -6,6 +7,7 @@ import '../main.dart';
 import '../models/app_models.dart';
 import '../services/api_service.dart';
 import '../services/local_storage_service.dart';
+import '../services/alarm_service.dart';
 import '../widgets/reminder_card.dart';
 import '../widgets/simple_time_picker.dart';
 import 'bind_screen.dart';
@@ -20,6 +22,7 @@ class ChildHomeScreen extends StatefulWidget {
 class _ChildHomeScreenState extends State<ChildHomeScreen> {
   final LocalStorageService _storage = LocalStorageService();
   final ApiService _apiService = ApiService();
+  final AlarmService _alarmService = AlarmService();
   final TextEditingController _textController = TextEditingController();
   final Uuid _uuid = const Uuid();
 
@@ -31,6 +34,7 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
   String _selectedPriority = 'normal';
   TimeOfDay _selectedTime = TimeOfDay.fromDateTime(DateTime.now().add(const Duration(minutes: 5)));
   DateTime _selectedDate = DateTime.now();
+  Timer? _refreshTimer;
 
   /// 从文字中智能提取时间（中文自然语言解析）
   /// 支持：12点、下午3点、3点半、半小时后、过一会、一会儿 等
@@ -63,6 +67,20 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
       RegExp(r'(\d{1,2})[.:：](\d{2})'),
       (m) => '${m.group(1)}点${m.group(2)}分',
     );
+    
+    // ★ "差X分Y点"模式 ★
+    final diffMatch = RegExp(r'差\s*([零一二两三四五六七八九十百\d]+)\s*分(?:钟)?\s*([零一二两三四五六七八九十百\d]+)\s*点半?').firstMatch(normalized);
+    if (diffMatch != null) {
+      final mVal = _chineseNumToInt(diffMatch.group(1)!);
+      final hVal = _chineseNumToInt(diffMatch.group(2)!);
+      final isHalf = normalized.substring(diffMatch.start, diffMatch.end).contains('点半');
+      if (mVal > 0 && hVal > 0) {
+        int totalMin = hVal * 60 + (isHalf ? 30 : 0) - mVal;
+        if (totalMin < 0) totalMin += 24 * 60;
+        return TimeOfDay(hour: totalMin ~/ 60 % 24, minute: totalMin % 60);
+      }
+    }
+    
     normalized = normalized.replaceAllMapped(
       RegExp(r'([零一二两三四五六七八九十百]+)\s*点'),
       (m) { final num = _chineseNumToInt(m.group(1)!); return num >= 0 ? '$num点' : m.group(0)!; },
@@ -175,7 +193,19 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
   ];
 
   @override
-  void initState() { super.initState(); _syncFromServer(); }
+  void initState() {
+    super.initState();
+    _initServices();
+    _syncFromServer();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _loadData());
+  }
+
+  Future<void> _initServices() async {
+    await _alarmService.init();
+    _alarmService.onReminderTriggered = (reminder) {
+      _loadData();
+    };
+  }
 
   /// 从后端同步数据
   Future<void> _syncFromServer() async {
@@ -248,15 +278,32 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
       bindings = [testBinding];
     }
 
+    // 收集所有绑定下的提醒（去重）
     List<ReminderModel> allReminders = [];
+    final seenIds = <String>{};
     for (final binding in bindings) {
       final reminders = await _storage.getReminders(binding.bindingId);
-      allReminders.addAll(reminders);
+      for (final r in reminders) {
+        if (!seenIds.contains(r.reminderId)) {
+          allReminders.add(r);
+          seenIds.add(r.reminderId);
+        }
+      }
     }
-    if (allReminders.isEmpty) allReminders = await _storage.getReminders('test_binding');
+    // 兜底
+    final testReminders = await _storage.getReminders('test_binding');
+    for (final r in testReminders) {
+      if (!seenIds.contains(r.reminderId)) {
+        allReminders.add(r);
+        seenIds.add(r.reminderId);
+      }
+    }
     allReminders.sort((a, b) => a.triggerTime.compareTo(b.triggerTime));
 
     setState(() { _reminders = allReminders; _isLoading = false; });
+    
+    // 启动闹钟轮询（子女端也需要，这样到点会响铃+改状态）
+    _alarmService.startChecking(allReminders);
   }
 
   void _showCreateReminderSheet() {
@@ -577,5 +624,10 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
   }
 
   @override
-  void dispose() { _textController.dispose(); super.dispose(); }
+  void dispose() {
+    _refreshTimer?.cancel();
+    _alarmService.stopChecking();
+    _textController.dispose();
+    super.dispose();
+  }
 }

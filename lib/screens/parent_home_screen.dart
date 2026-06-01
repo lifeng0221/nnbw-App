@@ -167,36 +167,42 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       return;
     }
 
-    final bindings = await _storage.getBindings(appState.userId!);
+    var bindings = await _storage.getBindings(appState.userId!);
     if (bindings.isEmpty) {
       final testBinding = BindingModel(bindingId: 'test_binding', parentId: appState.userId!, childId: 'child_test', status: 'active', createdAt: DateTime.now());
       await _storage.saveBinding(testBinding);
+      bindings = [testBinding];
     }
 
+    // 收集所有绑定下的提醒（去重）
     List<ReminderModel> allReminders = [];
+    final seenIds = <String>{};
     for (final binding in bindings) {
       final reminders = await _storage.getReminders(binding.bindingId);
-      allReminders.addAll(reminders);
+      for (final r in reminders) {
+        if (!seenIds.contains(r.reminderId)) {
+          allReminders.add(r);
+          seenIds.add(r.reminderId);
+        }
+      }
     }
-    if (allReminders.isEmpty) {
-      allReminders = await _storage.getReminders('test_binding');
+    // 兜底：也检查test_binding下的提醒（防止bindingId不匹配导致遗漏）
+    final testReminders = await _storage.getReminders('test_binding');
+    for (final r in testReminders) {
+      if (!seenIds.contains(r.reminderId)) {
+        allReminders.add(r);
+        seenIds.add(r.reminderId);
+      }
     }
 
-    final now = DateTime.now();
-    final todayReminders = allReminders.where((r) =>
-      r.triggerTime.year == now.year &&
-      r.triggerTime.month == now.month &&
-      r.triggerTime.day == now.day
-    ).toList();
-    todayReminders.sort((a, b) => a.triggerTime.compareTo(b.triggerTime));
+    // 显示所有提醒（不限于今天），避免刚创建的提醒因时间过了被过滤掉看不到
+    allReminders.sort((a, b) => a.triggerTime.compareTo(b.triggerTime));
+    
+    debugPrint('🔵 加载提醒: ${bindings.length}个绑定, ${allReminders.length}条提醒');
 
-    // 注意：不再自动把过期pending改为triggered
-    // 只有alarm_service实际触发铃声后才改状态
-    // 否则用户一创建提醒就显示"已响铃"但铃声根本没响
+    setState(() { _todayReminders = allReminders; _isLoading = false; });
 
-    setState(() { _todayReminders = todayReminders; _isLoading = false; });
-
-    // 启动/更新闹钟轮询（传入所有提醒，不只是今天的）
+    // 启动/更新闹钟轮询（传入所有提醒）
     _alarmService.startChecking(allReminders);
   }
 
@@ -260,6 +266,22 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       RegExp(r'(\d{1,2})[.:：](\d{2})'),
       (m) => '${m.group(1)}点${m.group(2)}分',
     );
+    
+    // ★ 在中文数字归一化之前，先处理"差X分Y点"模式 ★
+    // "差十分两点" -> 1:50  /  "差5分钟3点" -> 2:55  /  "差十分两点半" -> 2:20
+    final diffMatch = RegExp(r'差\s*([零一二两三四五六七八九十百\d]+)\s*分(?:钟)?\s*([零一二两三四五六七八九十百\d]+)\s*点半?').firstMatch(normalized);
+    if (diffMatch != null) {
+      final mVal = _chineseNumToInt(diffMatch.group(1)!);
+      final hVal = _chineseNumToInt(diffMatch.group(2)!);
+      final isHalf = normalized.substring(diffMatch.start, diffMatch.end).contains('点半');
+      if (mVal > 0 && hVal > 0) {
+        int totalMin = hVal * 60 + (isHalf ? 30 : 0) - mVal;
+        if (totalMin < 0) totalMin += 24 * 60;
+        debugPrint('🔵 时间解析: "$text" -> 差X分Y点 h=$hVal m=$mVal half=$isHalf -> ${totalMin ~/ 60 % 24}:${totalMin % 60}');
+        return TimeOfDay(hour: totalMin ~/ 60 % 24, minute: totalMin % 60);
+      }
+    }
+    
     // 替换 "二十三" "十五" "十" "三" 等出现在"点"前的中文数字
     normalized = normalized.replaceAllMapped(
       RegExp(r'([零一二两三四五六七八九十百]+)\s*点'),
@@ -764,7 +786,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           Icon(Icons.notifications_none, size: 80, color: AppColors.primary.withOpacity(0.3)),
           const SizedBox(height: 16),
-          const Text('今天还没有提醒', style: TextStyle(fontSize: 22, color: AppColors.textSecondary)),
+          const Text('还没有提醒', style: TextStyle(fontSize: 22, color: AppColors.textSecondary)),
           const SizedBox(height: 8),
           const Text('按住下方按钮说话，或输入文字', style: TextStyle(fontSize: 16, color: AppColors.textSecondary)),
         ]),
@@ -903,7 +925,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
           child: Row(children: [
             const Icon(Icons.wb_sunny, color: AppColors.primary, size: 22),
             const SizedBox(width: 8),
-            const Text('今日提醒', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textDark)),
+            const Text('提醒列表', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textDark)),
             const Spacer(),
             Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4), decoration: BoxDecoration(color: AppColors.primary, borderRadius: BorderRadius.circular(12)),
               child: Text('${_todayReminders.length}条', style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold))),
