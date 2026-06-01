@@ -153,9 +153,9 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
     }
     
     // "X点"
-    final simpleHourMatch = RegExp(r'(?<!\d)(\d{1,2})\s*点(?!\s*[半分\d])').firstMatch(normalized);
+    final simpleHourMatch = RegExp(r'(^|\D)(\d{1,2})\s*点(?!\s*[半分\d])').firstMatch(normalized);
     if (simpleHourMatch != null) {
-      var h = int.tryParse(simpleHourMatch.group(1) ?? '') ?? -1;
+      var h = int.tryParse(simpleHourMatch.group(2) ?? '') ?? -1;
       if (h >= 0 && h <= 24) {
         if (isAfternoon || isEvening) { if (h < 12) h += 12; }
         else if (isMorning && h == 12) h = 0;

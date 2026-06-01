@@ -361,10 +361,11 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       return TimeOfDay(hour: h, minute: m);
     }
     
-    // "X点"
-    final simpleHourMatch = RegExp(r'(?<!\d)(\d{1,2})\s*点(?!\s*[半分\d])').firstMatch(normalized);
+    // "X点" — 不带分/半的纯小时
+    // 不用lookbehind，用(^|\D)代替，更兼容
+    final simpleHourMatch = RegExp(r'(^|\D)(\d{1,2})\s*点(?!\s*[半分\d])').firstMatch(normalized);
     if (simpleHourMatch != null) {
-      var h = int.tryParse(simpleHourMatch.group(1) ?? '') ?? -1;
+      var h = int.tryParse(simpleHourMatch.group(2) ?? '') ?? -1;
       if (h >= 0 && h <= 24) {
         if (isAfternoon || isEvening) { if (h < 12) h += 12; }
         else if (isMorning && h == 12) h = 0;
@@ -379,18 +380,9 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
   TimeOfDay? _dialogSelectedTime;
   
   void _showConfirmDialog({String? prefilledText}) {
-    final displayText = prefilledText ?? _recognizedText;
-    _textController.text = displayText;
+    final initialText = prefilledText ?? _recognizedText;
+    _textController.text = initialText;
     _dialogSelectedTime = null; // 重置
-    // 智能提取时间：从文字中自动识别"12点""下午3点半"等
-    final parsedTime = _parseTimeFromText(displayText);
-    // DEBUG: 打印解析结果
-    debugPrint('=== 时间解析 DEBUG ===');
-    debugPrint('  输入文本: "$displayText"');
-    debugPrint('  解析结果: ${parsedTime != null ? "${parsedTime.hour}:${parsedTime.minute}" : "null"}');
-    // 默认：提取到的时间 ?? 5分钟后
-    final defaultTime = parsedTime ?? TimeOfDay.fromDateTime(DateTime.now().add(const Duration(minutes: 5)));
-    debugPrint('  最终defaultTime: ${defaultTime.hour}:${defaultTime.minute}');
 
     showDialog(
       context: context,
@@ -398,12 +390,23 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            // 大号时间优先显示已选时间
+            // 每次build都重新从当前输入框文本解析时间
+            final currentText = _textController.text;
+            final parsedTime = _parseTimeFromText(currentText);
+            final defaultTime = parsedTime ?? TimeOfDay.fromDateTime(DateTime.now().add(const Duration(minutes: 5)));
             final displayTime = _dialogSelectedTime ?? defaultTime;
+
             void handleConfirm() {
               Navigator.pop(dialogContext);
-              // Bug修复：如果用户没手动改时间，用解析出来的defaultTime
+              // 用解析出的时间（如果用户没手动改，就用自动识别的）
               _createReminder(_textController.text, _dialogSelectedTime ?? defaultTime);
+            }
+
+            // 文字变化时重新解析（清除手动选择的时间，让自动识别重新生效）
+            void onTextChanged(String val) {
+              setDialogState(() {
+                _dialogSelectedTime = null; // 重置手动选择
+              });
             }
 
             return AlertDialog(
@@ -419,14 +422,14 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
                   const SizedBox(width: 12),
                   const Text('添加提醒', style: TextStyle(fontSize: 24, color: AppColors.textDark, fontWeight: FontWeight.bold)),
                   const Spacer(),
-                  // DEBUG: 显示解析状态
+                  // 解析状态标签
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(
                       color: parsedTime != null ? Colors.green.withOpacity(0.1) : Colors.red.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Text(parsedTime != null ? '✓${parsedTime.hour}:${parsedTime.minute}' : '✗未识别',
+                    child: Text(parsedTime != null ? '✓${parsedTime.hour}:${parsedTime.minute.toString().padLeft(2, '0')}' : '✗未识别',
                       style: TextStyle(fontSize: 13, color: parsedTime != null ? Colors.green : Colors.red, fontWeight: FontWeight.bold)),
                   ),
                   const SizedBox(width: 4),
@@ -444,6 +447,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
                       style: const TextStyle(fontSize: 22, color: AppColors.textDark),
                       maxLines: 3,
                       autofocus: true,
+                      onChanged: onTextChanged,
                       decoration: InputDecoration(
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AppColors.primary)),
                         focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AppColors.primary, width: 2)),
@@ -453,7 +457,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
                       ),
                     ),
 
-                    if (displayText.isNotEmpty && prefilledText == null && _recognizedText.isNotEmpty)
+                    if (initialText.isNotEmpty && prefilledText == null && _recognizedText.isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.only(top: 8),
                         child: Row(children: [
@@ -508,7 +512,6 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  // Bug 2 修复: 使用displayTime而不是defaultTime
                                   Text(
                                     _formatTimeOfDay(displayTime),
                                     style: const TextStyle(fontSize: 40, fontWeight: FontWeight.bold, color: AppColors.primary),
@@ -524,7 +527,6 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
                             ),
                           ),
                           const SizedBox(height: 6),
-                          // Bug 2 修复: 底部提示根据selectedTime更新
                           Center(child: Text(
                             _dialogSelectedTime != null ? '已手动设定提醒时间' : (parsedTime != null ? '✓ 已自动识别提醒时间' : '默认5分钟后提醒'),
                             style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
