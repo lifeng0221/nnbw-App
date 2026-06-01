@@ -1119,10 +1119,12 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
             _diagRow('初始化错误', alarm.initError ?? '无'),
             _diagRow('serverBindingId', _serverBindingId?.toString() ?? '❌ 未获取'),
             _diagRow('userId', context.read<AppState>().userId ?? '无'),
+            _diagRow('本地提醒数', _todayReminders.length.toString()),
             const SizedBox(height: 12),
             const Text('如果"监听提醒"为0：提醒数据没传给闹钟', style: TextStyle(color: Colors.red, fontSize: 14)),
-            const Text('如果"serverBindingId"未获取：未完成绑定，无法同步', style: TextStyle(color: Colors.red, fontSize: 14)),
+            const Text('如果"serverBindingId"未获取：未绑定或绑定未持久化', style: TextStyle(color: Colors.red, fontSize: 14)),
             const Text('如果"通知插件"未就绪：到点不会弹通知，但状态会变', style: TextStyle(color: Colors.orange, fontSize: 14)),
+            const Text('v1.0.29: binding_id已持久化，重启不丢失', style: TextStyle(color: Colors.green, fontSize: 14)),
           ])),
           actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭'))],
         ));
