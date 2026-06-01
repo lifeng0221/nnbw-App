@@ -382,7 +382,8 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
   void _showConfirmDialog({String? prefilledText}) {
     final initialText = prefilledText ?? _recognizedText;
     _textController.text = initialText;
-    _dialogSelectedTime = null; // 重置
+    // 初始就尝试解析时间（和子女端一样）
+    _dialogSelectedTime = _parseTimeFromText(initialText);
 
     showDialog(
       context: context,
@@ -402,11 +403,12 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
               _createReminder(_textController.text, _dialogSelectedTime ?? defaultTime);
             }
 
-            // 文字变化时重新解析（清除手动选择的时间，让自动识别重新生效）
+            // 文字变化时重新解析（和子女端一样，直接设置时间）
             void onTextChanged(String val) {
-              setDialogState(() {
-                _dialogSelectedTime = null; // 重置手动选择
-              });
+              final parsed = _parseTimeFromText(val);
+              if (parsed != null) {
+                setDialogState(() => _dialogSelectedTime = parsed);
+              }
             }
 
             return AlertDialog(
