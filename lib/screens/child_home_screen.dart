@@ -35,6 +35,7 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
   TimeOfDay _selectedTime = TimeOfDay.fromDateTime(DateTime.now().add(const Duration(minutes: 5)));
   DateTime _selectedDate = DateTime.now();
   Timer? _refreshTimer;
+  Timer? _serverSyncTimer; // 定期从服务器同步
 
   /// 从文字中智能提取时间（中文自然语言解析）
   /// 支持：12点、下午3点、3点半、半小时后、过一会、一会儿 等
@@ -67,6 +68,19 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
       RegExp(r'(\d{1,2})[.:：](\d{2})'),
       (m) => '${m.group(1)}点${m.group(2)}分',
     );
+    
+    // ★ "差一刻Y点"模式 ★
+    // "差一刻两点" -> 1:45  /  "差一刻钟3点" -> 2:45
+    final diffKemuMatch = RegExp(r'差\s*一刻(?:钟)?\s*([零一二两三四五六七八九十百\d]+)\s*点半?').firstMatch(normalized);
+    if (diffKemuMatch != null) {
+      final hVal = _chineseNumToInt(diffKemuMatch.group(1)!);
+      final isHalf = normalized.substring(diffKemuMatch.start, diffKemuMatch.end).contains('点半');
+      if (hVal > 0) {
+        int totalMin = hVal * 60 + (isHalf ? 30 : 0) - 15; // 一刻=15分钟
+        if (totalMin < 0) totalMin += 24 * 60;
+        return TimeOfDay(hour: totalMin ~/ 60 % 24, minute: totalMin % 60);
+      }
+    }
     
     // ★ "差X分Y点"模式 ★
     final diffMatch = RegExp(r'差\s*([零一二两三四五六七八九十百\d]+)\s*分(?:钟)?\s*([零一二两三四五六七八九十百\d]+)\s*点半?').firstMatch(normalized);
@@ -127,6 +141,10 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
       final target = now.add(const Duration(minutes: 30));
       return TimeOfDay(hour: target.hour, minute: target.minute);
     }
+    if (normalized.contains('一刻钟后') || normalized.contains('一刻后')) {
+      final target = now.add(const Duration(minutes: 15));
+      return TimeOfDay(hour: target.hour, minute: target.minute);
+    }
     if (normalized.contains('一小时后') || normalized.contains('一个钟头后') || normalized.contains('一个钟后') || normalized.contains('一个小时候')) {
       final target = now.add(const Duration(hours: 1));
       return TimeOfDay(hour: target.hour, minute: target.minute);
@@ -158,6 +176,16 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
       if (isAfternoon || isEvening) { if (h < 12) h += 12; }
       else if (isMorning && h == 12) h = 0;
       return TimeOfDay(hour: h, minute: 30);
+    }
+    
+    // "X点一刻" = X:15  /  "X点三刻" = X:45
+    final kemuMatch = RegExp(r'(\d+)\s*点\s*(一|三)\s*刻').firstMatch(normalized);
+    if (kemuMatch != null) {
+      var h = int.tryParse(kemuMatch.group(1) ?? '') ?? 0;
+      final kemu = kemuMatch.group(2) == '一' ? 15 : 45;
+      if (isAfternoon || isEvening) { if (h < 12) h += 12; }
+      else if (isMorning && h == 12) h = 0;
+      return TimeOfDay(hour: h, minute: kemu);
     }
     
     // "X点XX分" / "X点XX"
@@ -196,8 +224,9 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
   void initState() {
     super.initState();
     _initServices();
-    _syncFromServer();
     _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _loadData());
+    // 每60秒从服务器同步数据（跨设备同步）
+    _serverSyncTimer = Timer.periodic(const Duration(seconds: 60), (_) => _syncFromServer());
   }
 
   Future<void> _initServices() async {
@@ -207,7 +236,7 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
     };
   }
 
-  /// 从后端同步数据
+  /// 从后端同步数据（每60秒调用一次 + 首次启动）
   Future<void> _syncFromServer() async {
     final appState = context.read<AppState>();
     if (appState.userId == null) { setState(() => _isLoading = false); return; }
@@ -215,11 +244,14 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
     setState(() => _isSyncing = true);
     
     try {
+      debugPrint('🟢 子女端: 开始从服务器同步...');
+      
       // 1. 注册/获取用户
       await _apiService.createUser(userId: appState.userId!, role: 'child', nickname: appState.nickname);
       
       // 2. 拉取绑定关系
       final bindResp = await _apiService.getBindings(childId: appState.userId!);
+      debugPrint('🟢 子女端: 绑定查询结果: ${bindResp['success']}, data=${bindResp['data']}');
       if (bindResp['success'] == true && bindResp['data'] is List) {
         for (final j in bindResp['data'] as List) {
           final binding = BindingModel(
@@ -232,35 +264,49 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
           await _storage.saveBinding(binding);
           if (binding.status == 'active' && _serverBindingId == null) {
             _serverBindingId = j['binding_id'] as int?;
+            debugPrint('🟢 子女端: 设置serverBindingId=$_serverBindingId');
           }
         }
       }
       
-      // 3. 拉取提醒
+      // 3. 拉取提醒（增量同步）
       if (_serverBindingId != null) {
         final reminderResp = await _apiService.getReminders(_serverBindingId!);
+        debugPrint('🟢 子女端: 提醒查询结果: ${reminderResp['success']}, data=${reminderResp['data']}');
         if (reminderResp['success'] == true && reminderResp['data'] is List) {
-          for (final j in reminderResp['data'] as List) {
-            final reminder = ReminderModel(
-              reminderId: (j['reminder_id'] ?? '').toString(),
-              bindingId: (j['binding_id'] ?? '').toString(),
-              createdBy: j['created_by'] ?? '',
-              content: j['content'] ?? '',
-              voiceUrl: j['voice_url'],
-              triggerTime: j['trigger_time'] != null ? DateTime.parse(j['trigger_time']) : DateTime.now(),
-              repeatType: j['repeat_type'] ?? 'once',
-              category: j['category'] ?? '生活',
-              priority: j['priority'] ?? 'normal',
-              status: j['status'] ?? 'pending',
-              snoozeCount: j['snooze_count'] ?? 0,
-              createdAt: j['created_at'] != null ? DateTime.parse(j['created_at']) : DateTime.now(),
-            );
-            await _storage.saveReminder(reminder);
+          final serverReminders = reminderResp['data'] as List;
+          for (final j in serverReminders) {
+            final serverId = (j['reminder_id'] ?? '').toString();
+            final localReminder = await _storage.getReminderById(serverId);
+            if (localReminder == null) {
+              // 新提醒：从服务器来的
+              final reminder = ReminderModel(
+                reminderId: serverId,
+                bindingId: (j['binding_id'] ?? '').toString(),
+                createdBy: j['created_by'] ?? '',
+                content: j['content'] ?? '',
+                voiceUrl: j['voice_url'],
+                triggerTime: j['trigger_time'] != null ? DateTime.parse(j['trigger_time']) : DateTime.now(),
+                repeatType: j['repeat_type'] ?? 'once',
+                category: j['category'] ?? '生活',
+                priority: j['priority'] ?? 'normal',
+                status: j['status'] ?? 'pending',
+                snoozeCount: j['snooze_count'] ?? 0,
+                createdAt: j['created_at'] != null ? DateTime.parse(j['created_at']) : DateTime.now(),
+              );
+              await _storage.saveReminder(reminder);
+              debugPrint('🟢 子女端: 从服务器同步新提醒: ${reminder.content} (${reminder.formattedTime})');
+            } else if (localReminder.status == 'pending' && j['status'] != 'pending') {
+              await _storage.updateReminderStatus(serverId, j['status']?.toString() ?? 'pending');
+              debugPrint('🟢 子女端: 从服务器同步状态更新: $serverId -> ${j['status']}');
+            }
           }
         }
+      } else {
+        debugPrint('🟡 子女端: 没有serverBindingId，无法从服务器同步提醒（可能尚未绑定）');
       }
     } catch (e) {
-      debugPrint('子女端同步失败: $e');
+      debugPrint('🔴 子女端同步失败: $e');
     }
     
     setState(() => _isSyncing = false);
@@ -626,6 +672,7 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _serverSyncTimer?.cancel();
     _alarmService.stopChecking();
     _textController.dispose();
     super.dispose();

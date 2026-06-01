@@ -26,6 +26,7 @@ class AlarmService {
   Function(ReminderModel)? onReminderTriggered;
 
   bool _initialized = false;
+  bool get isInitialized => _initialized;
 
   Future<void> init() async {
     if (_initialized) {
@@ -78,7 +79,7 @@ class AlarmService {
 
   /// 启动定时检查 — 每次loadReminders都调用，更新提醒列表
   void startChecking(List<ReminderModel> reminders) {
-    _reminders = reminders;
+    _reminders = List.from(reminders); // 浅拷贝，避免外部修改
     debugPrint('🟢 AlarmService: 更新提醒列表，共${reminders.length}条');
     // 只在第一次启动timer，后续只更新数据
     if (_checkTimer == null || !_checkTimer!.isActive) {
@@ -98,7 +99,13 @@ class AlarmService {
 
   /// 更新提醒列表（不重启timer）
   void updateReminders(List<ReminderModel> reminders) {
-    _reminders = reminders;
+    _reminders = List.from(reminders);
+  }
+
+  /// 清除已触发ID（snooze后需要重新触发）
+  void clearTriggeredId(String reminderId) {
+    _triggeredIds.remove(reminderId);
+    debugPrint('🟢 AlarmService: 清除触发ID $reminderId（允许重新触发）');
   }
 
   /// 轮询检查逻辑
@@ -109,6 +116,7 @@ class AlarmService {
     
     int pendingCount = 0;
     int alreadyTriggeredCount = 0;
+    int pastDueCount = 0;
     
     for (final r in _reminders) {
       if (r.status != 'pending' && r.status != 'snoozed') continue;
@@ -117,46 +125,71 @@ class AlarmService {
       
       // triggerTime已到（当前时间 >= 提醒时间）
       if (!now.isBefore(r.triggerTime)) {
+        pastDueCount++;
         toTrigger.add(r);
         _triggeredIds.add(r.reminderId);
       }
     }
     
-    if (pendingCount > 0) {
-      debugPrint('🟢 轮询: ${_reminders.length}条提醒, $pendingCount条待响, $alreadyTriggeredCount条已触发, ${toTrigger.length}条即将触发');
+    if (pendingCount > 0 || toTrigger.isNotEmpty) {
+      debugPrint('🟢 轮询: 总${_reminders.length}条, $pendingCount条待响, $alreadyTriggeredCount条已触发, $pastDueCount条到期, ${toTrigger.length}条即将触发');
+      for (final r in toTrigger) {
+        debugPrint('🟢   → 将触发: "${r.content}" triggerTime=${r.triggerTime} now=$now');
+      }
     }
 
-    // 批量触发
+    // 批量触发（加try-catch防止单条失败影响其他）
     for (final r in toTrigger) {
-      _triggerReminder(r);
+      _triggerReminderSafely(r);
     }
     
-    // 清理过旧的已触发ID（超过1小时的）
+    // 清理过旧的已触发ID（超过2小时的）
     _triggeredIds.removeWhere((id) {
       final r = _reminders.where((r) => r.reminderId == id).firstOrNull;
-      return r == null || now.difference(r.triggerTime).inHours >= 1;
+      return r == null || now.difference(r.triggerTime).inHours >= 2;
     });
+  }
+
+  /// 安全触发提醒（不抛异常，失败时移除triggeredId允许重试）
+  Future<void> _triggerReminderSafely(ReminderModel reminder) async {
+    try {
+      await _triggerReminder(reminder);
+    } catch (e, stackTrace) {
+      debugPrint('🔴 触发提醒失败，移除triggeredId允许重试: ${reminder.content}, 错误: $e');
+      debugPrint('🔴 堆栈: $stackTrace');
+      // 触发失败，移除ID允许下次重试
+      _triggeredIds.remove(reminder.reminderId);
+    }
   }
 
   /// 触发提醒
   Future<void> _triggerReminder(ReminderModel reminder) async {
-    debugPrint('=== 触发提醒: ${reminder.content} (${reminder.triggerTime}) ===');
+    debugPrint('=== 🔔 触发提醒: "${reminder.content}" (${reminder.triggerTime}) ===');
     
     // 1. 先更新状态为triggered
-    await _storage.updateReminderStatus(reminder.reminderId, 'triggered');
+    final updated = await _storage.updateReminderStatus(reminder.reminderId, 'triggered');
+    debugPrint('🟢 状态更新结果: $updated, reminderId=${reminder.reminderId}');
 
     // 2. 发通知
-    await showReminderNotification(reminder);
+    try {
+      await showReminderNotification(reminder);
+    } catch (e) {
+      debugPrint('🔴 通知发送失败（不影响状态）: $e');
+    }
 
     // 3. 播放铃声
-    await playAlarmSound(isUrgent: reminder.isUrgent);
+    try {
+      await playAlarmSound(isUrgent: reminder.isUrgent);
+    } catch (e) {
+      debugPrint('🔴 铃声播放失败（不影响状态）: $e');
+    }
 
     // 4. 回调通知UI刷新
     onReminderTriggered?.call(reminder);
+    debugPrint('🟢 提醒触发完成: ${reminder.content}');
   }
 
   Future<void> showReminderNotification(ReminderModel reminder) async {
-    // 使用默认通知声音（避免RawResource路径问题）
     const androidDetails = AndroidNotificationDetails(
       'reminder_channel', '提醒通知',
       channelDescription: '到点提醒通知',
@@ -164,7 +197,6 @@ class AlarmService {
       priority: Priority.max,
       playSound: true,
       enableVibration: true,
-      // 不指定自定义sound，用渠道默认声音
     );
     const details = NotificationDetails(android: androidDetails, iOS: DarwinNotificationDetails());
     try {
@@ -184,20 +216,17 @@ class AlarmService {
   Future<void> playAlarmSound({bool isUrgent = false}) async {
     debugPrint('🟢 播放铃声: isUrgent=$isUrgent, initialized=$_initialized');
     try {
-      // 先确保audioplayer状态正常
       await _audioPlayer.stop();
       await _audioPlayer.play(AssetSource('sounds/${isUrgent ? "alarm_urgent" : "alarm_normal"}.mp3'));
       debugPrint('🟢 铃声播放成功');
     } catch (e) {
       debugPrint('🔴 播放铃声失败: $e');
-      // 尝试播放系统默认声音
       try {
         await _audioPlayer.stop();
         await _audioPlayer.play(AssetSource('sounds/alarm_normal.mp3'));
         debugPrint('🟢 备用铃声播放成功');
       } catch (e2) {
         debugPrint('🔴 备用铃声也失败: $e2');
-        // 最后尝试播放系统通知声
         try {
           await _audioPlayer.play(UrlSource('https://assets.mixkit.co/sfx/preview/286/286-preview.mp3'));
         } catch (e3) {

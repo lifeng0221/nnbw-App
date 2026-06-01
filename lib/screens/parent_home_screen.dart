@@ -61,17 +61,20 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
   late Animation<double> _pulseAnimation;
   Timer? _recordingTimer;
   Timer? _refreshTimer;
+  Timer? _serverSyncTimer; // 定期从服务器同步
   int _recordingSeconds = 0;
+  bool _alarmInitialized = false; // 标记alarm是否初始化完成
 
   @override
   void initState() {
     super.initState();
     _initAnimations();
-    _initVoice();
-    _syncFromServer(); // 首次从后端拉取数据
+    _initServices(); // 初始化所有服务（含alarm）
     _setupAlarmCallback();
-    // Bug 7 修复: 前台每10秒刷新一次提醒列表
+    // 前台每10秒刷新一次提醒列表（本地存储）
     _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _loadReminders());
+    // 每60秒从服务器同步数据（跨设备同步）
+    _serverSyncTimer = Timer.periodic(const Duration(seconds: 60), (_) => _syncFromServer());
   }
 
   void _initAnimations() {
@@ -79,9 +82,14 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     _pulseAnimation = Tween<double>(begin: 1.0, end: 1.4).animate(CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut));
   }
 
-  Future<void> _initVoice() async {
+  /// 初始化所有服务（语音+闹钟），确保alarm初始化完成后再加载数据
+  Future<void> _initServices() async {
     await _voiceService.init();
-    await _alarmService.init(); // 初始化通知和铃声服务
+    await _alarmService.init();
+    _alarmInitialized = true;
+    debugPrint('🟢 长辈端: 所有服务初始化完成，开始加载数据');
+    // 初始化完成后立即同步+加载
+    await _syncFromServer();
   }
 
   void _setupAlarmCallback() {
@@ -91,7 +99,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     };
   }
 
-  /// 从后端同步数据到本地
+  /// 从后端同步数据到本地（每60秒调用一次 + 首次启动）
   Future<void> _syncFromServer() async {
     final appState = context.read<AppState>();
     if (appState.userId == null) {
@@ -102,15 +110,19 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     setState(() => _isSyncing = true);
     
     try {
+      debugPrint('🟢 长辈端: 开始从服务器同步...');
+      
       // 1. 注册/获取用户
       final userResp = await _apiService.createUser(
         userId: appState.userId!,
         role: 'parent',
         nickname: appState.nickname,
       );
+      debugPrint('🟢 长辈端: 用户注册/获取结果: ${userResp['success']}');
       
       // 2. 拉取绑定关系
       final bindResp = await _apiService.getBindings(parentId: appState.userId!);
+      debugPrint('🟢 长辈端: 绑定查询结果: ${bindResp['success']}, data=${bindResp['data']}');
       if (bindResp['success'] == true && bindResp['data'] is List) {
         final bindings = bindResp['data'] as List;
         for (final j in bindings) {
@@ -122,38 +134,54 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
             createdAt: j['created_at'] != null ? DateTime.parse(j['created_at']) : DateTime.now(),
           );
           await _storage.saveBinding(binding);
-          // 记住后端binding_id
+          // 记住后端binding_id（整数）
           if (binding.status == 'active' && _serverBindingId == null) {
             _serverBindingId = j['binding_id'] as int?;
+            debugPrint('🟢 长辈端: 设置serverBindingId=$_serverBindingId');
           }
         }
       }
       
-      // 3. 拉取所有绑定下的提醒
+      // 3. 拉取所有绑定下的提醒（覆盖式同步：服务器为准）
       if (_serverBindingId != null) {
         final reminderResp = await _apiService.getReminders(_serverBindingId!);
+        debugPrint('🟢 长辈端: 提醒查询结果: ${reminderResp['success']}, data=${reminderResp['data']}');
         if (reminderResp['success'] == true && reminderResp['data'] is List) {
-          for (final j in reminderResp['data'] as List) {
-            final reminder = ReminderModel(
-              reminderId: (j['reminder_id'] ?? '').toString(),
-              bindingId: (j['binding_id'] ?? '').toString(),
-              createdBy: j['created_by'] ?? '',
-              content: j['content'] ?? '',
-              voiceUrl: j['voice_url'],
-              triggerTime: j['trigger_time'] != null ? DateTime.parse(j['trigger_time']) : DateTime.now(),
-              repeatType: j['repeat_type'] ?? 'once',
-              category: j['category'] ?? '生活',
-              priority: j['priority'] ?? 'normal',
-              status: j['status'] ?? 'pending',
-              snoozeCount: j['snooze_count'] ?? 0,
-              createdAt: j['created_at'] != null ? DateTime.parse(j['created_at']) : DateTime.now(),
-            );
-            await _storage.saveReminder(reminder);
+          final serverReminders = reminderResp['data'] as List;
+          for (final j in serverReminders) {
+            final serverId = (j['reminder_id'] ?? '').toString();
+            // 检查本地是否已有此提醒（按serverId匹配）
+            final localReminder = await _storage.getReminderById(serverId);
+            if (localReminder == null) {
+              // 新提醒：从服务器来的，保存到本地
+              final reminder = ReminderModel(
+                reminderId: serverId,
+                bindingId: (j['binding_id'] ?? '').toString(),
+                createdBy: j['created_by'] ?? '',
+                content: j['content'] ?? '',
+                voiceUrl: j['voice_url'],
+                triggerTime: j['trigger_time'] != null ? DateTime.parse(j['trigger_time']) : DateTime.now(),
+                repeatType: j['repeat_type'] ?? 'once',
+                category: j['category'] ?? '生活',
+                priority: j['priority'] ?? 'normal',
+                status: j['status'] ?? 'pending',
+                snoozeCount: j['snooze_count'] ?? 0,
+                createdAt: j['created_at'] != null ? DateTime.parse(j['created_at']) : DateTime.now(),
+              );
+              await _storage.saveReminder(reminder);
+              debugPrint('🟢 长辈端: 从服务器同步新提醒: ${reminder.content} (${reminder.formattedTime})');
+            } else if (localReminder.status == 'pending' && j['status'] != 'pending') {
+              // 本地还是pending但服务器已更新状态，同步过来
+              await _storage.updateReminderStatus(serverId, j['status']?.toString() ?? 'pending');
+              debugPrint('🟢 长辈端: 从服务器同步状态更新: $serverId -> ${j['status']}');
+            }
           }
         }
+      } else {
+        debugPrint('🟡 长辈端: 没有serverBindingId，无法从服务器同步提醒（可能尚未绑定）');
       }
     } catch (e) {
-      debugPrint('同步失败: $e');
+      debugPrint('🔴 长辈端同步失败: $e');
     }
     
     setState(() => _isSyncing = false);
@@ -269,6 +297,18 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     
     // ★ 在中文数字归一化之前，先处理"差X分Y点"模式 ★
     // "差十分两点" -> 1:50  /  "差5分钟3点" -> 2:55  /  "差十分两点半" -> 2:20
+    // "差一刻两点" -> 1:45  /  "差一刻钟3点" -> 2:45
+    final diffKemuMatch = RegExp(r'差\s*一刻(?:钟)?\s*([零一二两三四五六七八九十百\d]+)\s*点半?').firstMatch(normalized);
+    if (diffKemuMatch != null) {
+      final hVal = _chineseNumToInt(diffKemuMatch.group(1)!);
+      final isHalf = normalized.substring(diffKemuMatch.start, diffKemuMatch.end).contains('点半');
+      if (hVal > 0) {
+        int totalMin = hVal * 60 + (isHalf ? 30 : 0) - 15; // 一刻=15分钟
+        if (totalMin < 0) totalMin += 24 * 60;
+        debugPrint('🔵 时间解析: "$text" -> 差一刻Y点 h=$hVal half=$isHalf -> ${totalMin ~/ 60 % 24}:${totalMin % 60}');
+        return TimeOfDay(hour: totalMin ~/ 60 % 24, minute: totalMin % 60);
+      }
+    }
     final diffMatch = RegExp(r'差\s*([零一二两三四五六七八九十百\d]+)\s*分(?:钟)?\s*([零一二两三四五六七八九十百\d]+)\s*点半?').firstMatch(normalized);
     if (diffMatch != null) {
       final mVal = _chineseNumToInt(diffMatch.group(1)!);
@@ -346,6 +386,10 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       final target = now.add(const Duration(minutes: 30));
       return TimeOfDay(hour: target.hour, minute: target.minute);
     }
+    if (normalized.contains('一刻钟后') || normalized.contains('一刻后')) {
+      final target = now.add(const Duration(minutes: 15));
+      return TimeOfDay(hour: target.hour, minute: target.minute);
+    }
     if (normalized.contains('一小时后') || normalized.contains('一个钟头后') || normalized.contains('一个钟后') || normalized.contains('一个小时候')) {
       final target = now.add(const Duration(hours: 1));
       return TimeOfDay(hour: target.hour, minute: target.minute);
@@ -375,6 +419,17 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       else if (isMorning && h == 12) h = 0;
       debugPrint('🔵 时间解析: "$text" -> normalized="$normalized" -> 半点匹配 h=$h:30');
       return TimeOfDay(hour: h, minute: 30);
+    }
+    
+    // "X点一刻" = X:15  /  "X点三刻" = X:45
+    final kemuMatch = RegExp(r'(\d+)\s*点\s*(一|三)\s*刻').firstMatch(normalized);
+    if (kemuMatch != null) {
+      var h = int.tryParse(kemuMatch.group(1) ?? '') ?? 0;
+      final kemu = kemuMatch.group(2) == '一' ? 15 : 45;
+      if (isAfternoon || isEvening) { if (h < 12) h += 12; }
+      else if (isMorning && h == 12) h = 0;
+      debugPrint('🔵 时间解析: "$text" -> X点一刻/三刻匹配 h=$h:m=$kemu');
+      return TimeOfDay(hour: h, minute: kemu);
     }
     
     // "X点XX分" / "X点XX"
@@ -715,6 +770,8 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
   Future<void> _snoozeReminder(ReminderModel r) async {
     await _storage.snoozeReminder(r.reminderId);
     await _alarmService.stopAlarmSound();
+    // 关键：snooze后清除triggeredId，让闹钟可以在新时间重新触发
+    _alarmService.clearTriggeredId(r.reminderId);
     // 同步后端
     _syncReminderStatus(r, 'snoozed');
     if (!mounted) return;
@@ -1060,7 +1117,8 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
   void dispose() {
     _pulseController.dispose();
     _recordingTimer?.cancel();
-    _refreshTimer?.cancel();  // Bug 7 修复: 清理刷新定时器
+    _refreshTimer?.cancel();
+    _serverSyncTimer?.cancel();
     _alarmService.stopChecking();
     _voiceService.dispose();
     _textController.dispose();
