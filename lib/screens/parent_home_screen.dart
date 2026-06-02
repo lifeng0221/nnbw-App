@@ -1138,7 +1138,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
             const Text('如果"监听提醒"为0：提醒数据没传给闹钟', style: TextStyle(color: Colors.red, fontSize: 14)),
             const Text('如果"serverBindingId"未获取：未绑定或绑定未持久化', style: TextStyle(color: Colors.red, fontSize: 14)),
             const Text('如果"通知插件"未就绪：到点不会弹通知，但状态会变', style: TextStyle(color: Colors.orange, fontSize: 14)),
-            const Text('v1.0.30: 修复绑定API字段名+诊断增强', style: TextStyle(color: Colors.green, fontSize: 14)),
+            const Text('v1.0.31: 移除本地Mock降级+API超时30s', style: TextStyle(color: Colors.green, fontSize: 14)),
           ])),
           actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭'))],
         ));

@@ -1,4 +1,3 @@
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -406,25 +405,26 @@ class _BindScreenState extends State<BindScreen> with SingleTickerProviderStateM
         }
       }
       
-      // 后端失败时，本地生成配对码（降级方案）
-      final random = Random();
-      final code = (100000 + random.nextInt(900000)).toString();
-      await _storage.savePairCode(appState.userId!);
-      setState(() {
-        _isLoading = false;
-        _generatedCode = code;
-      });
-      _animController.forward(from: 0);
+      // 🔧 v1.0.31: 移除本地Mock降级，后端失败就报错
+      setState(() => _isLoading = false);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('生成配对码失败，请检查网络后重试'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 4),
+        ),
+      );
     } catch (e) {
-      // 降级：本地生成
-      final random = Random();
-      final code = (100000 + random.nextInt(900000)).toString();
-      await _storage.savePairCode(appState.userId!);
-      setState(() {
-        _isLoading = false;
-        _generatedCode = code;
-      });
-      _animController.forward(from: 0);
+      setState(() => _isLoading = false);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('网络异常，请检查网络后重试'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 4),
+        ),
+      );
     }
   }
   
@@ -485,33 +485,20 @@ class _BindScreenState extends State<BindScreen> with SingleTickerProviderStateM
         return;
       }
     } catch (e) {
-      print('后端确认绑定失败: $e');
+      print('🔴 后端确认绑定失败: $e');
     }
     
-    // 降级：本地验证（任何6位数字都能成功，方便测试）
-    final binding = await _storage.verifyPairCode(code, appState.userId!);
-    
+    // 🔧 v1.0.31: 移除本地Mock降级！之前后端失败时仍显示"绑定成功（本地模式）"
+    // 导致用户以为绑定了，但serverBindingId为空，同步永远不工作
     setState(() => _isLoading = false);
     
-    if (binding != null || code.length == 6) {
-      // 本地Mock成功
-      _animController.forward(from: 0);
-      setState(() { _isLoading = false; _bindSuccess = true; });
-      
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('绑定成功！（本地模式）'), backgroundColor: Colors.green),
-      );
-      
-      // 🔧 v1.0.27: 绑定成功后自动返回
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted) Navigator.pop(context, true);
-      });
-    } else {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('配对码无效或已过期，请重新获取'), backgroundColor: Colors.red),
-      );
-    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('绑定失败，请检查网络后重试。确保子女端先生成配对码！'),
+        backgroundColor: Colors.red,
+        duration: Duration(seconds: 5),
+      ),
+    );
   }
 }

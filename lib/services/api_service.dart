@@ -22,7 +22,7 @@ class ApiService {
   Future<Map<String, dynamic>> get(String path, {Map<String, String>? queryParams}) async {
     try {
       final uri = Uri.parse('$baseUrl$path').replace(queryParameters: queryParams);
-      final response = await _client.get(uri, headers: {'Content-Type': 'application/json'}).timeout(const Duration(seconds: 10));
+      final response = await _client.get(uri, headers: {'Content-Type': 'application/json'}).timeout(const Duration(seconds: 30));
       return _handleResponse(response);
     } catch (e) {
       return {'success': false, 'error': e.toString()};
@@ -35,7 +35,7 @@ class ApiService {
         Uri.parse('$baseUrl$path'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(data),
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 30));
       return _handleResponse(response);
     } catch (e) {
       return {'success': false, 'error': e.toString()};
@@ -47,7 +47,7 @@ class ApiService {
       final request = http.Request('PUT', Uri.parse('$baseUrl$path'));
       request.headers['Content-Type'] = 'application/json';
       if (data != null) request.body = jsonEncode(data);
-      final streamed = await _client.send(request).timeout(const Duration(seconds: 10));
+      final streamed = await _client.send(request).timeout(const Duration(seconds: 30));
       final response = await http.Response.fromStream(streamed);
       return _handleResponse(response);
     } catch (e) {
@@ -59,7 +59,7 @@ class ApiService {
     try {
       final request = http.Request('DELETE', Uri.parse('$baseUrl$path'));
       request.headers['Content-Type'] = 'application/json';
-      final streamed = await _client.send(request).timeout(const Duration(seconds: 10));
+      final streamed = await _client.send(request).timeout(const Duration(seconds: 30));
       final response = await http.Response.fromStream(streamed);
       return _handleResponse(response);
     } catch (e) {
