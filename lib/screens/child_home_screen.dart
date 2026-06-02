@@ -294,6 +294,10 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
       final bindResp = await _apiService.getBindings(childId: appState.userId!);
       print('🟢 子女端: 绑定查询结果: success=${bindResp['success']}, data=${bindResp['data']}');
       if (bindResp['success'] == true && bindResp['data'] is List) {
+        // 🔧 v1.0.31: 只取 active 且 child_id 非null的绑定作为 serverBindingId
+        // 之前的bug：遍历所有绑定，_serverBindingId 被最后一个覆盖，
+        // 可能被 pending 状态的绑定（child_id=null）覆盖，导致创建提醒发到错误的绑定
+        int? bestBindingId;
         for (final j in bindResp['data'] as List) {
           final binding = BindingModel(
             bindingId: (j['binding_id'] ?? '').toString(),
@@ -303,24 +307,28 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
             createdAt: j['created_at'] != null ? DateTime.parse(j['created_at']) : DateTime.now(),
           );
           await _storage.saveBinding(binding);
-          // 🔧 v1.0.27: 正确获取serverBindingId
-          if (binding.status == 'active' || binding.status == 'pending') {
+          // 只取 active 且 child_id 不为空的绑定
+          if (binding.status == 'active' && binding.childId.isNotEmpty) {
             final bid = j['binding_id'];
+            int? parsedBid;
             if (bid is int) {
-              _serverBindingId = bid;
-              // 🔧 v1.0.29: 立即持久化
-              await _storage.saveServerBindingId(appState.userId!, bid);
-              print('🟢 子女端: 设置并持久化serverBindingId=$_serverBindingId (status=${binding.status})');
+              parsedBid = bid;
             } else if (bid != null) {
-              final parsed = int.tryParse(bid.toString());
-              if (parsed != null) {
-                _serverBindingId = parsed;
-                // 🔧 v1.0.29: 立即持久化
-                await _storage.saveServerBindingId(appState.userId!, parsed);
-                print('🟢 子女端: 设置并持久化serverBindingId=$_serverBindingId (status=${binding.status})');
+              parsedBid = int.tryParse(bid.toString());
+            }
+            if (parsedBid != null) {
+              // 取最新的active绑定（binding_id最大的）
+              if (bestBindingId == null || parsedBid > bestBindingId) {
+                bestBindingId = parsedBid;
               }
             }
           }
+        }
+        // 设置最终的 serverBindingId
+        if (bestBindingId != null) {
+          _serverBindingId = bestBindingId;
+          await _storage.saveServerBindingId(appState.userId!, bestBindingId);
+          print('🟢 子女端: 设置serverBindingId=$_serverBindingId (取最大active绑定)');
         }
       }
       

@@ -171,6 +171,8 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       print('🟢 长辈端: 绑定查询结果: success=${bindResp['success']}, data=${bindResp['data']}');
       if (bindResp['success'] == true && bindResp['data'] is List) {
         final bindings = bindResp['data'] as List;
+        // 🔧 v1.0.31: 只取 active 且 child_id 非null的绑定作为 serverBindingId
+        int? bestBindingId;
         for (final j in bindings) {
           final binding = BindingModel(
             bindingId: (j['binding_id'] ?? '').toString(),
@@ -180,25 +182,26 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
             createdAt: j['created_at'] != null ? DateTime.parse(j['created_at']) : DateTime.now(),
           );
           await _storage.saveBinding(binding);
-          // 🔧 v1.0.27: 正确获取serverBindingId
-          // 只取active状态的绑定，取binding_id（整数）
-          if (binding.status == 'active' || binding.status == 'pending') {
+          // 只取 active 且 child_id 不为空的绑定
+          if (binding.status == 'active' && binding.childId.isNotEmpty) {
             final bid = j['binding_id'];
+            int? parsedBid;
             if (bid is int) {
-              _serverBindingId = bid;
-              // 🔧 v1.0.29: 立即持久化到SharedPreferences
-              await _storage.saveServerBindingId(appState.userId!, bid);
-              print('🟢 长辈端: 设置并持久化serverBindingId=$_serverBindingId (status=${binding.status})');
+              parsedBid = bid;
             } else if (bid != null) {
-              final parsed = int.tryParse(bid.toString());
-              if (parsed != null) {
-                _serverBindingId = parsed;
-                // 🔧 v1.0.29: 立即持久化到SharedPreferences
-                await _storage.saveServerBindingId(appState.userId!, parsed);
-                print('🟢 长辈端: 设置并持久化serverBindingId=$_serverBindingId (status=${binding.status})');
+              parsedBid = int.tryParse(bid.toString());
+            }
+            if (parsedBid != null) {
+              if (bestBindingId == null || parsedBid > bestBindingId) {
+                bestBindingId = parsedBid;
               }
             }
           }
+        }
+        if (bestBindingId != null) {
+          _serverBindingId = bestBindingId;
+          await _storage.saveServerBindingId(appState.userId!, bestBindingId);
+          print('🟢 长辈端: 设置serverBindingId=$_serverBindingId (取最大active绑定)');
         }
       }
       
@@ -1138,7 +1141,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
             const Text('如果"监听提醒"为0：提醒数据没传给闹钟', style: TextStyle(color: Colors.red, fontSize: 14)),
             const Text('如果"serverBindingId"未获取：未绑定或绑定未持久化', style: TextStyle(color: Colors.red, fontSize: 14)),
             const Text('如果"通知插件"未就绪：到点不会弹通知，但状态会变', style: TextStyle(color: Colors.orange, fontSize: 14)),
-            const Text('v1.0.31: 移除本地Mock降级+API超时30s', style: TextStyle(color: Colors.green, fontSize: 14)),
+            const Text('v1.0.31: 修复绑定选取+移除Mock降级+超时30s', style: TextStyle(color: Colors.green, fontSize: 14)),
           ])),
           actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭'))],
         ));
