@@ -152,10 +152,10 @@ class ApiService {
     return post('/api/bind/create_code', {'parent_id': parentId});
   }
   
-  /// 确认配对码（旧版）
-  /// 后端 POST /api/bind/confirm
+  /// 确认配对码
+  /// 后端 POST /api/bind/confirm（字段名: parent_code, child_id）
   Future<Map<String, dynamic>> confirmPairCode(String pairCode, String childId) async {
-    return post('/api/bind/confirm', {'code': pairCode, 'child_id': childId});
+    return post('/api/bind/confirm', {'parent_code': pairCode, 'child_id': childId});
   }
   
   // ==================== 提醒相关 ====================

@@ -1120,11 +1120,25 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
             _diagRow('serverBindingId', _serverBindingId?.toString() ?? '❌ 未获取'),
             _diagRow('userId', context.read<AppState>().userId ?? '无'),
             _diagRow('本地提醒数', _todayReminders.length.toString()),
+            const SizedBox(height: 8),
+            // v1.0.30: 显示每条提醒的triggerTime，方便排查闹钟问题
+            if (_todayReminders.isNotEmpty) ...[
+              const Divider(),
+              const Text('提醒详情:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              const SizedBox(height: 4),
+              ..._todayReminders.map((r) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Text(
+                  '${r.formattedTime} | ${r.status} | ${r.content.length > 10 ? r.content.substring(0, 10) + "..." : r.content}',
+                  style: const TextStyle(fontSize: 13, fontFamily: 'monospace'),
+                ),
+              )),
+            ],
             const SizedBox(height: 12),
             const Text('如果"监听提醒"为0：提醒数据没传给闹钟', style: TextStyle(color: Colors.red, fontSize: 14)),
             const Text('如果"serverBindingId"未获取：未绑定或绑定未持久化', style: TextStyle(color: Colors.red, fontSize: 14)),
             const Text('如果"通知插件"未就绪：到点不会弹通知，但状态会变', style: TextStyle(color: Colors.orange, fontSize: 14)),
-            const Text('v1.0.29: binding_id已持久化，重启不丢失', style: TextStyle(color: Colors.green, fontSize: 14)),
+            const Text('v1.0.30: 修复绑定API字段名+诊断增强', style: TextStyle(color: Colors.green, fontSize: 14)),
           ])),
           actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭'))],
         ));
