@@ -253,7 +253,7 @@ class AlarmService {
     if (!_notificationReady) return;
     
     // v1.0.40: 增强通知配置，支持全屏Intent
-    const androidDetails = AndroidNotificationDetails(
+    final androidDetails = AndroidNotificationDetails(
       'reminder_channel', '提醒通知',
       channelDescription: '到点提醒通知',
       importance: Importance.max,
@@ -272,7 +272,7 @@ class AlarmService {
         summaryText: '点击查看详情',
       ),
     );
-    const details = NotificationDetails(android: androidDetails, iOS: DarwinNotificationDetails());
+    final details = NotificationDetails(android: androidDetails, iOS: DarwinNotificationDetails());
     try {
       // v1.0.40: 使用不同的通知ID范围，避免与后台服务冲突
       final notificationId = reminder.reminderId.hashCode.abs() % 100000;

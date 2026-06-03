@@ -107,13 +107,7 @@ void runBackgroundService() {
       category: AndroidNotificationCategory.alarm,
       visibility: NotificationVisibility.public,
       icon: '@mipmap/ic_launcher',
-      sound: RawResourceAndroidNotificationSound('notification'),
       timeoutAfter: 60000, // 1分钟后自动消失
-      styleInformation: BigTextStyleInformation(
-        content,
-        contentTitle: '⏰ 念念不忘提醒',
-        summaryText: '点击查看详情',
-      ),
     );
     
     const details = NotificationDetails(android: androidDetails);
@@ -274,19 +268,10 @@ void runBackgroundService() {
     });
   }
   
-  // 注册服务
+  // 注册服务并启动
   service.configure(
     iosConfiguration: IosConfiguration(),
     androidConfiguration: AndroidConfiguration(
-      onStart: onStart,
-      isForegroundMode: true,
-      autoStartOnBoot: true,
-      autoStart: true,
-      initialNotificationTitle: '念念不忘',
-      initialNotificationContent: '守护服务启动中',
-      notificationChannelId: notificationChannelId,
-    ),
-    android: AndroidConfiguration(
       onStart: onStart,
       isForegroundMode: true,
       autoStartOnBoot: true,
