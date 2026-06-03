@@ -15,3 +15,4 @@ local.properties
 *.lock
 !pubspec.lock
 artifact_v1049.zip
+nnbw_*.apk
