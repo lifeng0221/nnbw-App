@@ -328,9 +328,9 @@ class ReminderForegroundService : Service() {
                     try {
                         val triggerTime = parseIsoTime(triggerTimeStr)
                         val diff = now - triggerTime
+                        val content = obj.optString("content", "提醒")  // 提前声明，避免作用域问题
 
                         if (diff >= 0) {
-                            val content = obj.optString("content", "提醒")
                             if (diff <= TRIGGER_WINDOW_MS) {
                                 val priority = obj.optString("priority", "normal")
 
