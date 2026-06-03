@@ -7,13 +7,6 @@ import 'screens/bind_screen.dart';
 import 'screens/login_screen.dart';
 import 'services/api_service.dart';
 import 'services/alarm_service.dart';
-import 'services/background_reminder_service.dart';
-
-// 前台服务入口点（必须在main.dart顶层，带@pragma）
-@pragma('vm:entry-point')
-void backgroundServiceEntryPoint() {
-  runBackgroundService();
-}
 
 
 void main() async {

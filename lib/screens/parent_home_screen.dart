@@ -162,6 +162,9 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
   /// v1.0.40: 启动后台前台服务
   Future<void> _startBackgroundService() async {
     try {
+      // 先配置（在主isolate中调用configure）
+      await _backgroundService.initialize();
+      // 再启动
       final success = await _backgroundService.startService();
       setState(() => _backgroundServiceRunning = success);
       print('🟢 后台服务启动: $success');
