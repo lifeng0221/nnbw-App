@@ -79,6 +79,23 @@ class ReminderForegroundService : Service() {
             android.util.Log.d(TAG, "原生铃声已停止")
         }
         
+        /** 
+         * v1.0.49: 从Flutter侧触发原生闹钟铃声
+         * 关键：Flutter audioplayers在息屏时播不了，必须走原生MediaPlayer+USAGE_ALARM
+         * 这个方法由Flutter的playAlarmSound()通过MethodChannel调用
+         */
+        fun playAlarmFromFlutter(context: Context) {
+            android.util.Log.d(TAG, "收到Flutter请求，启动原生闹钟铃声")
+            try {
+                // 通过启动Service来播放铃声（Service持有MediaPlayer逻辑）
+                val intent = Intent(context, ReminderForegroundService::class.java)
+                intent.action = "PLAY_ALARM"
+                context.startService(intent)
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "启动闹钟铃声失败", e)
+            }
+        }
+        
         private fun releaseWakeLocks() {
             try {
                 wakeLock?.let { if (it.isHeld) it.release() }
@@ -122,6 +139,19 @@ class ReminderForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         android.util.Log.d(TAG, "服务onStartCommand, action=${intent?.action}")
+
+        // v1.0.49: Flutter侧请求播放原生闹钟铃声
+        if (intent?.action == "PLAY_ALARM") {
+            android.util.Log.d(TAG, "收到Flutter播放铃声请求")
+            playAlarmSound()
+            // 确保前台服务在运行
+            if (!isRunning) {
+                startForeground(NOTIFICATION_ID, createForegroundNotification())
+                isRunning = true
+                handler.post(checkRunnable)
+            }
+            return START_STICKY
+        }
 
         // 处理AlarmManager触发的提醒
         if (intent?.action == ACTION_ALARM_TRIGGER) {

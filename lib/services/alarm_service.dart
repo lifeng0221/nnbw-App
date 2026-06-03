@@ -331,10 +331,21 @@ class AlarmService {
 
   Future<void> playAlarmSound({bool isUrgent = false}) async {
     print('🟢 播放铃声: isUrgent=$isUrgent');
+    
+    // v1.0.49: 优先用原生MediaPlayer（USAGE_ALARM，息屏/Doze下也能响）
+    try {
+      await _platformChannel.invokeMethod('playAlarm');
+      print('🟢 原生MediaPlayer铃声播放成功（USAGE_ALARM）');
+      return; // 原生播放成功，不再用Flutter audioplayers
+    } catch (e) {
+      print('🟡 原生铃声播放失败，降级到Flutter audioplayers: $e');
+    }
+    
+    // 降级：Flutter audioplayers（息屏时可能不响）
     try {
       await _audioPlayer.stop();
       await _audioPlayer.play(AssetSource('sounds/${isUrgent ? "alarm_urgent" : "alarm_normal"}.mp3'));
-      print('🟢 铃声播放成功');
+      print('🟢 Flutter铃声播放成功');
     } catch (e) {
       print('🔴 播放铃声失败: $e');
       try {
