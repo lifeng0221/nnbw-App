@@ -178,6 +178,14 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
       var h = int.tryParse(halfMatch.group(1) ?? '') ?? 0;
       if (isAfternoon || isEvening) { if (h < 12) h += 12; }
       else if (isMorning && h == 12) h = 0;
+      // v1.0.48: 智能判断
+      else if (!isAfternoon && !isEvening && !isMorning && h >= 1 && h <= 12) {
+        final targetToday = DateTime(now.year, now.month, now.day, h, 30);
+        final targetPm = DateTime(now.year, now.month, now.day, h + 12, 30);
+        if (targetToday.isBefore(now) && targetPm.isAfter(now)) {
+          h = h + 12;
+        }
+      }
       return TimeOfDay(hour: h, minute: 30);
     }
     
@@ -188,6 +196,14 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
       final kemu = kemuMatch.group(2) == '一' ? 15 : 45;
       if (isAfternoon || isEvening) { if (h < 12) h += 12; }
       else if (isMorning && h == 12) h = 0;
+      // v1.0.48: 智能判断
+      else if (!isAfternoon && !isEvening && !isMorning && h >= 1 && h <= 12) {
+        final targetToday = DateTime(now.year, now.month, now.day, h, kemu);
+        final targetPm = DateTime(now.year, now.month, now.day, h + 12, kemu);
+        if (targetToday.isBefore(now) && targetPm.isAfter(now)) {
+          h = h + 12;
+        }
+      }
       return TimeOfDay(hour: h, minute: kemu);
     }
     
@@ -198,6 +214,15 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
       final m = int.tryParse(hourMinMatch.group(2) ?? '') ?? 0;
       if (isAfternoon || isEvening) { if (h < 12) h += 12; }
       else if (isMorning && h == 12) h = 0;
+      // v1.0.48: 智能判断上午/下午 — 没有明确上下午关键词时
+      else if (!isAfternoon && !isEvening && !isMorning && h >= 1 && h <= 12) {
+        final targetToday = DateTime(now.year, now.month, now.day, h, m);
+        final targetPm = DateTime(now.year, now.month, now.day, h + 12, m);
+        // 如果上午时间已过但下午时间还没到，自动用下午
+        if (targetToday.isBefore(now) && targetPm.isAfter(now)) {
+          h = h + 12;
+        }
+      }
       return TimeOfDay(hour: h, minute: m);
     }
     
@@ -208,6 +233,14 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
       if (h >= 0 && h <= 24) {
         if (isAfternoon || isEvening) { if (h < 12) h += 12; }
         else if (isMorning && h == 12) h = 0;
+        // v1.0.48: 同样的智能判断
+        else if (!isAfternoon && !isEvening && !isMorning && h >= 1 && h <= 12) {
+          final targetToday = DateTime(now.year, now.month, now.day, h, 0);
+          final targetPm = DateTime(now.year, now.month, now.day, h + 12, 0);
+          if (targetToday.isBefore(now) && targetPm.isAfter(now)) {
+            h = h + 12;
+          }
+        }
         return TimeOfDay(hour: h, minute: 0);
       }
     }

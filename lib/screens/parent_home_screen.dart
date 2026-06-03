@@ -632,6 +632,12 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       var h = int.tryParse(halfMatch.group(1) ?? '') ?? 0;
       if (isAfternoon || isEvening) { if (h < 12) h += 12; }
       else if (isMorning && h == 12) h = 0;
+      // v1.0.48: 智能判断
+      else if (!isAfternoon && !isEvening && !isMorning && h >= 1 && h <= 12) {
+        final targetToday = DateTime(now.year, now.month, now.day, h, 30);
+        final targetPm = DateTime(now.year, now.month, now.day, h + 12, 30);
+        if (targetToday.isBefore(now) && targetPm.isAfter(now)) h = h + 12;
+      }
       print('🔵 时间解析: "$text" -> normalized="$normalized" -> 半点匹配 h=$h:30');
       return TimeOfDay(hour: h, minute: 30);
     }
@@ -643,6 +649,12 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       final kemu = kemuMatch.group(2) == '一' ? 15 : 45;
       if (isAfternoon || isEvening) { if (h < 12) h += 12; }
       else if (isMorning && h == 12) h = 0;
+      // v1.0.48: 智能判断
+      else if (!isAfternoon && !isEvening && !isMorning && h >= 1 && h <= 12) {
+        final targetToday = DateTime(now.year, now.month, now.day, h, kemu);
+        final targetPm = DateTime(now.year, now.month, now.day, h + 12, kemu);
+        if (targetToday.isBefore(now) && targetPm.isAfter(now)) h = h + 12;
+      }
       print('🔵 时间解析: "$text" -> X点一刻/三刻匹配 h=$h:m=$kemu');
       return TimeOfDay(hour: h, minute: kemu);
     }
@@ -654,18 +666,29 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       final m = int.tryParse(hourMinMatch.group(2) ?? '') ?? 0;
       if (isAfternoon || isEvening) { if (h < 12) h += 12; }
       else if (isMorning && h == 12) h = 0;
+      // v1.0.48: 智能判断
+      else if (!isAfternoon && !isEvening && !isMorning && h >= 1 && h <= 12) {
+        final targetToday = DateTime(now.year, now.month, now.day, h, m);
+        final targetPm = DateTime(now.year, now.month, now.day, h + 12, m);
+        if (targetToday.isBefore(now) && targetPm.isAfter(now)) h = h + 12;
+      }
       print('🔵 时间解析: "$text" -> normalized="$normalized" -> 点分匹配 h=$h:m=$m');
       return TimeOfDay(hour: h, minute: m);
     }
     
     // "X点" — 不带分/半的纯小时
-    // 不用lookbehind，用(^|\D)代替，更兼容
     final simpleHourMatch = RegExp(r'(^|\D)(\d{1,2})\s*点(?!\s*[半分\d])').firstMatch(normalized);
     if (simpleHourMatch != null) {
       var h = int.tryParse(simpleHourMatch.group(2) ?? '') ?? -1;
       if (h >= 0 && h <= 24) {
         if (isAfternoon || isEvening) { if (h < 12) h += 12; }
         else if (isMorning && h == 12) h = 0;
+        // v1.0.48: 智能判断
+        else if (!isAfternoon && !isEvening && !isMorning && h >= 1 && h <= 12) {
+          final targetToday = DateTime(now.year, now.month, now.day, h, 0);
+          final targetPm = DateTime(now.year, now.month, now.day, h + 12, 0);
+          if (targetToday.isBefore(now) && targetPm.isAfter(now)) h = h + 12;
+        }
         print('🔵 时间解析: "$text" -> normalized="$normalized" -> X点匹配 h=$h');
         return TimeOfDay(hour: h, minute: 0);
       }
@@ -1319,15 +1342,23 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
             // v1.0.30: 显示每条提醒的triggerTime，方便排查闹钟问题
             if (_todayReminders.isNotEmpty) ...[
               const Divider(),
-              const Text('提醒详情:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              const Text('提醒详情（含完整时间）:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
               const SizedBox(height: 4),
-              ..._todayReminders.map((r) => Padding(
-                padding: const EdgeInsets.symmetric(vertical: 2),
-                child: Text(
-                  '${r.formattedTime} | ${r.status} | ${r.content.length > 10 ? r.content.substring(0, 10) + "..." : r.content}',
-                  style: const TextStyle(fontSize: 13, fontFamily: 'monospace'),
-                ),
-              )),
+              ..._todayReminders.map((r) {
+                final now = DateTime.now();
+                final diff = now.difference(r.triggerTime);
+                final diffText = diff.isNegative 
+                    ? '还${-diff.inMinutes}分钟' 
+                    : '已过${diff.inHours}h${diff.inMinutes % 60}m';
+                final isPast = !diff.isNegative;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Text(
+                    '${r.triggerTime.month}/${r.triggerTime.day} ${r.formattedTime} | ${r.status} | $diffText | ${r.content.length > 8 ? r.content.substring(0, 8) + ".." : r.content}',
+                    style: TextStyle(fontSize: 13, fontFamily: 'monospace', color: isPast ? Colors.red : null),
+                  ),
+                );
+              }),
             ],
             const SizedBox(height: 12),
             const Text('如果"监听提醒"为0：提醒数据没传给闹钟', style: TextStyle(color: Colors.red, fontSize: 14)),
@@ -1335,7 +1366,27 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
             const Text('如果"守护服务"未启动：息屏时可能无法响铃', style: TextStyle(color: Colors.orange, fontSize: 14)),
             const Text('v1.0.40: 前台服务保活+全屏通知+电池优化引导', style: TextStyle(color: Colors.green, fontSize: 14)),
           ])),
-          actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭'))],
+          actions: [
+            // v1.0.48: 测试响铃按钮
+            TextButton(
+              onPressed: () async {
+                try {
+                  await _alarmService.playAlarmSound(isUrgent: false);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('🔔 铃声播放中...3秒后停止'), duration: Duration(seconds: 2)),
+                  );
+                  await Future.delayed(const Duration(seconds: 3));
+                  await _alarmService.stopAlarmSound();
+                } catch (e) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('❌ 铃声失败: $e'), backgroundColor: Colors.red),
+                  );
+                }
+              },
+              child: const Text('🔔 测试响铃', style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
+            ),
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭')),
+          ],
         ));
       },
       child: Container(
