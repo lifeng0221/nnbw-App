@@ -592,11 +592,13 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
     if (appState.userId == null) return;
 
     List<BindingModel> bindings = await _storage.getBindings(appState.userId!);
-    if (bindings.isEmpty) bindings = await _storage.getBindings('child_test');
+    // v1.0.46: 移除test_binding兜底，没有绑定时提示用户
     if (bindings.isEmpty) {
-      final testBinding = BindingModel(bindingId: 'test_binding', parentId: 'parent_test', childId: appState.userId!, status: 'active', createdAt: DateTime.now());
-      await _storage.saveBinding(testBinding);
-      bindings = [testBinding];
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先绑定老人，再创建提醒'), backgroundColor: Colors.orange),
+      );
+      return;
     }
 
     final binding = bindings.first;
@@ -608,8 +610,11 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
       triggerTime = triggerTime.add(const Duration(days: 1));
     }
 
+    // v1.0.46: 优先使用serverBindingId
+    final effectiveBindingId = _serverBindingId?.toString() ?? binding.bindingId;
+    
     final reminder = ReminderModel(
-      reminderId: _uuid.v4(), bindingId: binding.bindingId, createdBy: appState.userId!,
+      reminderId: _uuid.v4(), bindingId: effectiveBindingId, createdBy: appState.userId!,
       content: text, triggerTime: triggerTime, category: _selectedCategory, priority: _selectedPriority,
       status: 'pending', createdAt: DateTime.now(),
     );

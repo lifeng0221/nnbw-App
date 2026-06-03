@@ -414,10 +414,11 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     }
 
     var bindings = await _storage.getBindings(appState.userId!);
+    // v1.0.46: 移除test_binding兜底逻辑——已绑定后不需要，且test_binding下的提醒无法同步服务器
     if (bindings.isEmpty) {
-      final testBinding = BindingModel(bindingId: 'test_binding', parentId: appState.userId!, childId: 'child_test', status: 'active', createdAt: DateTime.now());
-      await _storage.saveBinding(testBinding);
-      bindings = [testBinding];
+      setState(() { _todayReminders = []; _isLoading = false; });
+      _alarmService.startChecking([]);
+      return;
     }
 
     // 收集所有绑定下的提醒（去重）
@@ -430,14 +431,6 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
           allReminders.add(r);
           seenIds.add(r.reminderId);
         }
-      }
-    }
-    // 兜底：也检查test_binding下的提醒（防止bindingId不匹配导致遗漏）
-    final testReminders = await _storage.getReminders('test_binding');
-    for (final r in testReminders) {
-      if (!seenIds.contains(r.reminderId)) {
-        allReminders.add(r);
-        seenIds.add(r.reminderId);
       }
     }
 
@@ -910,10 +903,13 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     if (appState.userId == null) return;
 
     List<BindingModel> bindings = await _storage.getBindings(appState.userId!);
+    // v1.0.46: 没有绑定关系时不能创建提醒（之前用test_binding创建的无法同步服务器）
     if (bindings.isEmpty) {
-      final testBinding = BindingModel(bindingId: 'test_binding', parentId: appState.userId!, childId: 'child_test', status: 'active', createdAt: DateTime.now());
-      await _storage.saveBinding(testBinding);
-      bindings = [testBinding];
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先绑定子女，再创建提醒'), backgroundColor: Colors.orange),
+      );
+      return;
     }
 
     // 精确使用用户选择的时间
@@ -929,10 +925,13 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     
     print('🔵 创建提醒: text="$text", time=$time, triggerTime=$triggerTime, serverBindingId=$_serverBindingId');
 
+    // v1.0.46: 优先使用serverBindingId，确保与后端一致
+    final effectiveBindingId = _serverBindingId?.toString() ?? bindings.first.bindingId;
+    
     final reminderId = _uuid.v4();
     final reminder = ReminderModel(
       reminderId: reminderId,
-      bindingId: bindings.first.bindingId,
+      bindingId: effectiveBindingId,
       createdBy: appState.userId!,
       content: text.trim(),
       voiceUrl: _recognizedVoiceUrl,
