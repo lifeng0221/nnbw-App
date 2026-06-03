@@ -8,6 +8,7 @@ import '../models/app_models.dart';
 import '../services/api_service.dart';
 import '../services/local_storage_service.dart';
 import '../services/alarm_service.dart';
+import '../services/background_reminder_service.dart'; // v1.0.48: 子女端也启动前台服务
 import '../widgets/reminder_card.dart';
 import '../widgets/simple_time_picker.dart';
 import 'bind_screen.dart';
@@ -23,6 +24,7 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
   final LocalStorageService _storage = LocalStorageService();
   final ApiService _apiService = ApiService();
   final AlarmService _alarmService = AlarmService();
+  final BackgroundReminderService _backgroundService = BackgroundReminderService(); // v1.0.48
   final TextEditingController _textController = TextEditingController();
   final Uuid _uuid = const Uuid();
 
@@ -30,6 +32,7 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
   bool _isLoading = true;
   bool _isSyncing = false;
   int? _serverBindingId; // 后端binding_id（整数）
+  bool _backgroundServiceRunning = false; // v1.0.48
   String _selectedCategory = '生活';
   String _selectedPriority = 'normal';
   TimeOfDay _selectedTime = TimeOfDay.fromDateTime(DateTime.now().add(const Duration(minutes: 5)));
@@ -238,6 +241,10 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
     _alarmService.onReminderTriggered = (reminder) {
       _loadData();
     };
+    // v1.0.48: 过期提醒状态变化时刷新UI
+    _alarmService.onRemindersChanged = () {
+      _loadData();
+    };
     _alarmService.onDiagnosticUpdate = () {
       if (mounted) setState(() {});
     };
@@ -275,6 +282,31 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
     
     _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _loadData());
     _serverSyncTimer = Timer.periodic(const Duration(seconds: 60), (_) => _syncFromServer());
+    
+    // v1.0.48: 子女端也启动原生前台服务（确保后台也能触发提醒）
+    await _startBackgroundService();
+  }
+  
+  /// v1.0.48: 启动原生Kotlin前台服务
+  Future<void> _startBackgroundService() async {
+    try {
+      final running = await _backgroundService.checkRunning();
+      if (running) {
+        setState(() => _backgroundServiceRunning = true);
+        print('🟢 子女端: 原生前台服务已在运行');
+        return;
+      }
+      final success = await _backgroundService.startService();
+      if (mounted) {
+        setState(() => _backgroundServiceRunning = success);
+      }
+      print('🟢 子女端: 原生前台服务启动: $success');
+    } catch (e) {
+      print('🔴 子女端: 原生前台服务启动失败: $e');
+      if (mounted) {
+        setState(() => _backgroundServiceRunning = false);
+      }
+    }
   }
 
   /// 从后端同步数据（每60秒调用一次 + 首次启动）
@@ -399,10 +431,15 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
     if (appState.userId == null) { setState(() => _isLoading = false); return; }
 
     List<BindingModel> bindings = await _storage.getBindings(appState.userId!);
-    if (bindings.isEmpty) {
-      final testBinding = BindingModel(bindingId: 'test_binding', parentId: 'parent_test', childId: appState.userId!, status: 'active', createdAt: DateTime.now());
-      await _storage.saveBinding(testBinding);
-      bindings = [testBinding];
+    // v1.0.48: 移除test_binding兜底，没有绑定时只使用serverBindingId获取提醒
+    if (bindings.isEmpty && _serverBindingId != null) {
+      // 没有本地绑定记录但有serverBindingId，构造一个
+      final binding = BindingModel(
+        bindingId: _serverBindingId.toString(), 
+        parentId: '', childId: appState.userId!, 
+        status: 'active', createdAt: DateTime.now()
+      );
+      bindings = [binding];
     }
 
     // 收集所有绑定下的提醒（去重）
@@ -415,14 +452,6 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
           allReminders.add(r);
           seenIds.add(r.reminderId);
         }
-      }
-    }
-    // 兜底
-    final testReminders = await _storage.getReminders('test_binding');
-    for (final r in testReminders) {
-      if (!seenIds.contains(r.reminderId)) {
-        allReminders.add(r);
-        seenIds.add(r.reminderId);
       }
     }
     allReminders.sort((a, b) => a.triggerTime.compareTo(b.triggerTime));
@@ -762,6 +791,7 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
             _diagRow('serverBindingId', _serverBindingId?.toString() ?? '❌ 未获取'),
             _diagRow('userId', context.read<AppState>().userId ?? '无'),
             _diagRow('本地提醒数', _reminders.length.toString()),
+            _diagRow('前台服务', _backgroundServiceRunning ? '✅ 运行中' : '❌ 未启动'), // v1.0.48
             const SizedBox(height: 12),
             const Text('如果"监听提醒"为0：提醒数据没传给闹钟', style: TextStyle(color: Colors.red, fontSize: 14)),
             const Text('如果"serverBindingId"未获取：未绑定或绑定未持久化', style: TextStyle(color: Colors.red, fontSize: 14)),
@@ -846,6 +876,7 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
     _refreshTimer?.cancel();
     _serverSyncTimer?.cancel();
     _alarmService.stopChecking();
+    // v1.0.48: 不停止前台服务，让它在后台继续守护
     _textController.dispose();
     super.dispose();
   }

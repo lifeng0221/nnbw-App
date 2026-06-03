@@ -113,6 +113,10 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     _alarmService.onReminderTriggered = (reminder) {
       _loadReminders();
     };
+    // v1.0.48: 过期提醒状态变化时刷新UI
+    _alarmService.onRemindersChanged = () {
+      _loadReminders();
+    };
     
     print('🟢 长辈端: 服务初始化完成，闹钟诊断=${_alarmService.diagnosticText}');
     

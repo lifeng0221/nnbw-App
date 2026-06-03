@@ -37,6 +37,7 @@ class ReminderForegroundService : Service() {
         private const val PREFS_NAME = "FlutterSharedPreferences"
         private const val FLUTTER_PREFIX = "flutter." // Flutter shared_preferences自动添加的前缀
         private const val CHECK_INTERVAL_MS = 15_000L // 15秒检查一次
+        private const val TRIGGER_WINDOW_MS = 2 * 60 * 60 * 1000L // v1.0.48: 触发窗口2小时（和Flutter侧一致）
 
         // 已触发的提醒ID集合（避免重复触发）
         private val triggeredIds = mutableSetOf<String>()
@@ -204,21 +205,30 @@ class ReminderForegroundService : Service() {
                         val triggerTime = parseIsoTime(triggerTimeStr)
                         val diff = now - triggerTime
 
-                        // 到期且不超过30分钟
-                        if (diff >= 0 && diff <= 30 * 60 * 1000) {
-                            val content = obj.optString("content", "提醒")
-                            val priority = obj.optString("priority", "normal")
+                        if (diff >= 0) {
+                            if (diff <= TRIGGER_WINDOW_MS) {
+                                // 到期且在2小时触发窗口内 → 触发响铃
+                                val content = obj.optString("content", "提醒")
+                                val priority = obj.optString("priority", "normal")
 
-                            // 发送全屏通知+响铃
-                            showReminderNotification(reminderId, content, priority)
-                            
-                            // 更新状态为triggered
-                            obj.put("status", "triggered")
-                            needsSave = true
-                            triggeredIds.add(reminderId)
-                            triggeredCount++
+                                // 发送全屏通知+响铃
+                                showReminderNotification(reminderId, content, priority)
+                                
+                                // 更新状态为triggered
+                                obj.put("status", "triggered")
+                                needsSave = true
+                                triggeredIds.add(reminderId)
+                                triggeredCount++
 
-                            android.util.Log.d(TAG, "触发提醒: $content")
+                                android.util.Log.d(TAG, "触发提醒: $content")
+                            } else {
+                                // v1.0.48: 超过2小时的过期提醒标记为expired
+                                if (status == "pending" || status == "snoozed") {
+                                    obj.put("status", "expired")
+                                    needsSave = true
+                                    android.util.Log.d(TAG, "过期提醒: $content 已过${diff / 3600000}小时")
+                                }
+                            }
                         }
                     } catch (e: Exception) {
                         // 时间解析错误，跳过

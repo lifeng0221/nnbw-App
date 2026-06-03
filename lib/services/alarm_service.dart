@@ -23,7 +23,9 @@ class AlarmService {
   Timer? _checkTimer;
   List<ReminderModel> _reminders = [];
   final Set<String> _triggeredIds = {};
+  final Set<String> _expiredIds = {}; // v1.0.48: 已标记expired的ID（避免重复写SP）
   Function(ReminderModel)? onReminderTriggered;
+  Function? onRemindersChanged; // v1.0.48: 提醒状态变化回调（expired等），触发UI刷新
   
   // 诊断
   bool _initialized = false;
@@ -158,12 +160,14 @@ class AlarmService {
     final now = DateTime.now();
     lastCheckTime = now;
     final toTrigger = <ReminderModel>[];
+    bool hasExpired = false; // v1.0.48: 追踪是否有新expired
     
     int pendingCount = 0;
     int alreadyTriggeredCount = 0;
     int pastDueCount = 0;
     
-    for (final r in _reminders) {
+    for (int i = 0; i < _reminders.length; i++) {
+      final r = _reminders[i];
       if (r.status != 'pending' && r.status != 'snoozed') continue;
       pendingCount++;
       if (_triggeredIds.contains(r.reminderId)) { alreadyTriggeredCount++; continue; }
@@ -173,8 +177,30 @@ class AlarmService {
         // v1.0.46: 超过2小时的过期提醒自动标记为expired，不再触发响铃
         // 避免打开APP后一堆旧提醒同时响铃
         if (diff.inHours >= 2) {
-          _storage.updateReminderStatus(r.reminderId, 'expired');
-          print('🟡 过期提醒自动标记expired: "${r.content}" 已过${diff.inHours}小时');
+          if (!_expiredIds.contains(r.reminderId)) {
+            _storage.updateReminderStatus(r.reminderId, 'expired');
+            _expiredIds.add(r.reminderId);
+            print('🟡 过期提醒自动标记expired: "${r.content}" 已过${diff.inHours}小时');
+          }
+          // v1.0.48: 直接更新内存中的状态，避免下次检查还当成pending
+          _reminders[i] = ReminderModel(
+            reminderId: r.reminderId,
+            bindingId: r.bindingId,
+            createdBy: r.createdBy,
+            content: r.content,
+            voiceUrl: r.voiceUrl,
+            triggerTime: r.triggerTime,
+            repeatType: r.repeatType,
+            repeatConfig: r.repeatConfig,
+            category: r.category,
+            priority: r.priority,
+            status: 'expired',
+            confirmedAt: r.confirmedAt,
+            snoozeCount: r.snoozeCount,
+            snoozeMax: r.snoozeMax,
+            createdAt: r.createdAt,
+          );
+          hasExpired = true;
           continue;
         }
         pastDueCount++;
@@ -202,6 +228,11 @@ class AlarmService {
 
     for (final r in toTrigger) {
       _triggerReminderSafely(r);
+    }
+    
+    // v1.0.48: 如果有新expired，通知UI刷新
+    if (hasExpired) {
+      onRemindersChanged?.call();
     }
     
     _triggeredIds.removeWhere((id) {
