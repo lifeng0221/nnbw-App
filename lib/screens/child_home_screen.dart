@@ -338,11 +338,29 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
         print('🟢 子女端: 提醒查询结果: success=${reminderResp['success']}, data=${reminderResp['data']}');
         if (reminderResp['success'] == true && reminderResp['data'] is List) {
           final serverReminders = reminderResp['data'] as List;
+          // v1.0.46: 获取本地所有提醒，用于去重检查
+          final localReminders = <ReminderModel>[];
+          for (final binding in await _storage.getBindings(appState.userId!)) {
+            localReminders.addAll(await _storage.getReminders(binding.bindingId));
+          }
+          
           for (final j in serverReminders) {
             final serverId = (j['reminder_id'] ?? '').toString();
             final localReminder = await _storage.getReminderById(serverId);
             if (localReminder == null) {
-              // 新提醒：从服务器来的
+              // v1.0.46: 检查是否有同content+同triggerTime的本地UUID版本（重复根因）
+              final serverContent = j['content'] ?? '';
+              final serverTriggerTime = j['trigger_time'] ?? '';
+              final duplicate = localReminders.where((r) => 
+                r.content == serverContent && 
+                r.triggerTime.toIso8601String().substring(0, 16) == serverTriggerTime.substring(0, 16)
+              ).firstOrNull;
+              
+              if (duplicate != null && duplicate.reminderId != serverId) {
+                print('🟢 子女端: 替换重复提醒 ${duplicate.reminderId} → $serverId (${duplicate.content})');
+                await _storage.deleteReminder(duplicate.reminderId);
+              }
+              
               final reminder = ReminderModel(
                 reminderId: serverId,
                 bindingId: (j['binding_id'] ?? '').toString(),
@@ -358,7 +376,7 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
                 createdAt: j['created_at'] != null ? DateTime.parse(j['created_at']) : DateTime.now(),
               );
               await _storage.saveReminder(reminder);
-              print('🟢 子女端: 从服务器同步新提醒: ${reminder.content} (${reminder.formattedTime})');
+              print('🟢 子女端: 从服务器同步提醒: ${reminder.content} (${reminder.formattedTime})');
             } else if (localReminder.status == 'pending' && j['status'] != 'pending') {
               await _storage.updateReminderStatus(serverId, j['status']?.toString() ?? 'pending');
               print('🟢 子女端: 从服务器同步状态更新: $serverId -> ${j['status']}');
@@ -609,7 +627,29 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
         triggerTime: triggerTime.toIso8601String(),
         category: _selectedCategory,
         priority: _selectedPriority,
-      ).catchError((e) => print('子女端同步创建失败: $e'));
+      ).then((resp) async {
+        // v1.0.46: 用后端返回的reminder_id替换本地UUID，避免重复
+        if (resp['success'] == true && resp['data'] != null) {
+          final serverId = resp['data']['reminder_id']?.toString();
+          if (serverId != null && serverId != reminder.reminderId) {
+            print('🟢 子女端: 后端ID $serverId 替换本地UUID ${reminder.reminderId}');
+            await _storage.deleteReminder(reminder.reminderId);
+            final serverReminder = ReminderModel(
+              reminderId: serverId,
+              bindingId: _serverBindingId.toString(),
+              createdBy: appState.userId!,
+              content: text,
+              triggerTime: triggerTime,
+              category: _selectedCategory,
+              priority: _selectedPriority,
+              status: 'pending',
+              createdAt: DateTime.now(),
+            );
+            await _storage.saveReminder(serverReminder);
+            await _loadData();
+          }
+        }
+      }).catchError((e) => print('子女端同步创建失败: $e'));
     }
 
     if (!mounted) return;

@@ -169,6 +169,14 @@ class AlarmService {
       if (_triggeredIds.contains(r.reminderId)) { alreadyTriggeredCount++; continue; }
       
       if (!now.isBefore(r.triggerTime)) {
+        final diff = now.difference(r.triggerTime);
+        // v1.0.46: 超过2小时的过期提醒自动标记为expired，不再触发响铃
+        // 避免打开APP后一堆旧提醒同时响铃
+        if (diff.inHours >= 2) {
+          _storage.updateReminderStatus(r.reminderId, 'expired');
+          print('🟡 过期提醒自动标记expired: "${r.content}" 已过${diff.inHours}小时');
+          continue;
+        }
         pastDueCount++;
         toTrigger.add(r);
         _triggeredIds.add(r.reminderId);
