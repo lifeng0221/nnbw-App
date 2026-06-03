@@ -61,7 +61,7 @@
             android:foregroundServiceType="specialUse"
             android:exported="false"
             android:stopWithTask="true"
-            tools:replace="android:foregroundServiceType">
+            tools:replace="android:foregroundServiceType,android:exported,android:stopWithTask">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Reminder monitoring service for elderly care app" />
         </service>
