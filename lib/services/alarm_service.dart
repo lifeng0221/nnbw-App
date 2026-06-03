@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -20,6 +21,7 @@ class AlarmService {
   final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
   final AudioPlayer _audioPlayer = AudioPlayer();
   final LocalStorageService _storage = LocalStorageService();
+  static const _platformChannel = MethodChannel('com.niannianbuwang.app/reminder_service');
   Timer? _checkTimer;
   List<ReminderModel> _reminders = [];
   final Set<String> _triggeredIds = {};
@@ -351,6 +353,13 @@ class AlarmService {
 
   Future<void> stopAlarmSound() async {
     await _audioPlayer.stop();
+    // v1.0.49: 同时停止原生MediaPlayer铃声（息屏时Kotlin播放的）
+    try {
+      await _platformChannel.invokeMethod('stopAlarm');
+      print('🟢 已停止原生闹钟铃声');
+    } catch (e) {
+      print('🟡 停止原生铃声失败（可能未在播放）: $e');
+    }
   }
 
   Future<void> playVoice(String voiceUrl) async {

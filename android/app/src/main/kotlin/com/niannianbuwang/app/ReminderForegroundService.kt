@@ -1,14 +1,18 @@
 package com.niannianbuwang.app
 
 import android.app.*
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.media.AudioAttributes
+import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import org.json.JSONArray
@@ -16,15 +20,15 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 /**
- * 原生前台服务 — 念念不忘提醒守护
+ * 原生前台服务 — 念念不忘提醒守护 v1.0.49
  * 
- * 核心职责：APP在后台/息屏时仍能触发提醒响铃
- * 
- * 架构：
- * - 原生Kotlin Service，不依赖flutter_background_service包
- * - 通过SharedPreferences读取提醒数据（与Flutter侧共享）
- * - Handler定时轮询，到点发全屏通知+系统闹钟铃声
- * - MethodChannel供Flutter侧启动/停止服务
+ * 核心改动（v1.0.49）：
+ * - 铃声播放改用MediaPlayer + USAGE_ALARM，息屏/Doze下也能响
+ * - 添加WakeLock确保CPU运行
+ * - 添加AlarmManager精确调度（setExactAndAllowWhileIdle）
+ * - 通知渠道不再设铃声（由MediaPlayer负责），避免Doze下被静音
+ * - 通知添加"停止铃声"按钮
+ * - Flutter侧可通过MethodChannel停止原生铃声
  */
 class ReminderForegroundService : Service() {
 
@@ -35,30 +39,61 @@ class ReminderForegroundService : Service() {
         private const val NOTIFICATION_ID = 10001
         private const val REMINDER_NOTIFICATION_ID_START = 20000
         private const val PREFS_NAME = "FlutterSharedPreferences"
-        private const val FLUTTER_PREFIX = "flutter." // Flutter shared_preferences自动添加的前缀
-        private const val CHECK_INTERVAL_MS = 15_000L // 15秒检查一次
-        private const val TRIGGER_WINDOW_MS = 2 * 60 * 60 * 1000L // v1.0.48: 触发窗口2小时（和Flutter侧一致）
+        private const val FLUTTER_PREFIX = "flutter."
+        private const val CHECK_INTERVAL_MS = 30_000L // 30秒轮询（AlarmManager负责精确时间）
+        private const val TRIGGER_WINDOW_MS = 2 * 60 * 60 * 1000L // 触发窗口2小时
+        private const val ACTION_STOP_ALARM = "com.niannianbuwang.app.STOP_ALARM"
+        private const val ACTION_ALARM_TRIGGER = "com.niannianbuwang.app.ALARM_TRIGGER"
+        private const val EXTRA_REMINDER_ID = "reminder_id"
+        private const val EXTRA_REMINDER_CONTENT = "reminder_content"
 
-        // 已触发的提醒ID集合（避免重复触发）
         private val triggeredIds = mutableSetOf<String>()
+        private var alarmMediaPlayer: MediaPlayer? = null
+        private var wakeLock: PowerManager.WakeLock? = null
+        private var screenWakeLock: PowerManager.WakeLock? = null
 
-        /** 启动前台服务 */
         fun start(context: Context) {
             val intent = Intent(context, ReminderForegroundService::class.java)
             intent.action = "START"
             ContextCompat.startForegroundService(context, intent)
         }
 
-        /** 停止前台服务 */
         fun stop(context: Context) {
             val intent = Intent(context, ReminderForegroundService::class.java)
             intent.action = "STOP"
             context.startService(intent)
         }
+        
+        /** 停止原生闹钟铃声（供MethodChannel调用） */
+        fun stopAlarmSound() {
+            try {
+                alarmMediaPlayer?.let {
+                    if (it.isPlaying) it.stop()
+                    it.release()
+                }
+                alarmMediaPlayer = null
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "停止铃声异常", e)
+            }
+            releaseWakeLocks()
+            android.util.Log.d(TAG, "原生铃声已停止")
+        }
+        
+        private fun releaseWakeLocks() {
+            try {
+                wakeLock?.let { if (it.isHeld) it.release() }
+                wakeLock = null
+            } catch (e: Exception) { }
+            try {
+                screenWakeLock?.let { if (it.isHeld) it.release() }
+                screenWakeLock = null
+            } catch (e: Exception) { }
+        }
     }
 
     private val handler = Handler(Looper.getMainLooper())
     private var isRunning = false
+    private val alarmManager by lazy { getSystemService(Context.ALARM_SERVICE) as AlarmManager }
 
     private val checkRunnable = object : Runnable {
         override fun run() {
@@ -76,12 +111,34 @@ class ReminderForegroundService : Service() {
         super.onCreate()
         android.util.Log.d(TAG, "服务onCreate")
         createNotificationChannels()
+        
+        val filter = IntentFilter(ACTION_STOP_ALARM)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(stopAlarmReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(stopAlarmReceiver, filter)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         android.util.Log.d(TAG, "服务onStartCommand, action=${intent?.action}")
 
+        // 处理AlarmManager触发的提醒
+        if (intent?.action == ACTION_ALARM_TRIGGER) {
+            val reminderId = intent.getStringExtra(EXTRA_REMINDER_ID) ?: ""
+            val content = intent.getStringExtra(EXTRA_REMINDER_CONTENT) ?: "提醒"
+            if (!triggeredIds.contains(reminderId)) {
+                android.util.Log.d(TAG, "AlarmManager触发提醒: $content")
+                playAlarmSound()
+                showReminderNotification(reminderId, content, "normal")
+                markReminderTriggered(reminderId)
+                triggeredIds.add(reminderId)
+            }
+            return START_STICKY
+        }
+
         if (intent?.action == "STOP") {
+            stopAlarmSound()
             stopSelf()
             return START_NOT_STICKY
         }
@@ -91,30 +148,40 @@ class ReminderForegroundService : Service() {
             return START_STICKY
         }
 
-        // 启动前台服务（必须5秒内调用，否则ANR）
         startForeground(NOTIFICATION_ID, createForegroundNotification())
 
         isRunning = true
         handler.post(checkRunnable)
 
         android.util.Log.d(TAG, "前台服务已启动，开始轮询提醒")
-        return START_STICKY // 被杀后自动重启
+        return START_STICKY
     }
 
     override fun onDestroy() {
         super.onDestroy()
         isRunning = false
         handler.removeCallbacks(checkRunnable)
+        stopAlarmSound()
+        try {
+            unregisterReceiver(stopAlarmReceiver)
+        } catch (e: Exception) { }
         android.util.Log.d(TAG, "服务已销毁")
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    /** 创建前台服务通知渠道和提醒闹钟通知渠道 */
+    private val stopAlarmReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == ACTION_STOP_ALARM) {
+                android.util.Log.d(TAG, "收到停止铃声广播")
+                stopAlarmSound()
+            }
+        }
+    }
+
     private fun createNotificationChannels() {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
-        // 1. 前台服务通知渠道（低优先级，仅显示"运行中"）
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val serviceChannel = NotificationChannel(
                 CHANNEL_ID,
@@ -126,7 +193,7 @@ class ReminderForegroundService : Service() {
             }
             manager.createNotificationChannel(serviceChannel)
 
-            // 2. 提醒闹钟通知渠道（最高优先级，支持全屏+响铃+振动）
+            // 提醒闹钟通知渠道 — 不设铃声（由MediaPlayer负责），避免Doze静音
             val reminderChannel = NotificationChannel(
                 REMINDER_CHANNEL_ID,
                 "提醒闹钟",
@@ -136,21 +203,13 @@ class ReminderForegroundService : Service() {
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 500, 200, 500, 200, 500)
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-                // 使用系统默认闹钟铃声
-                val alarmSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                    ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-                setSound(alarmSound, AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ALARM)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build())
-                // 允许全屏Intent（锁屏弹出）
-                // Android 14+ 需要USE_EXACT_ALARM或FOREGROUND_SERVICE_SPECIAL_USE权限
+                // 关键：不设铃声！由MediaPlayer+USAGE_ALARM播放，通知铃声在Doze下会被静音
+                setSound(null, null)
             }
             manager.createNotificationChannel(reminderChannel)
         }
     }
 
-    /** 创建前台服务通知（持续显示"守护中"） */
     private fun createForegroundNotification(): Notification {
         val intent = packageManager.getLaunchIntentForPackage(packageName)
         val pendingIntent = PendingIntent.getActivity(
@@ -168,21 +227,88 @@ class ReminderForegroundService : Service() {
             .build()
     }
 
-    /** 检查SharedPreferences中的提醒数据 */
+    /** 
+     * 播放闹钟铃声 — v1.0.49核心改动
+     * MediaPlayer + USAGE_ALARM + WakeLock，息屏/Doze下也能响
+     */
+    private fun playAlarmSound() {
+        try {
+            // 1. 停止旧铃声
+            try {
+                alarmMediaPlayer?.let {
+                    if (it.isPlaying) it.stop()
+                    it.release()
+                }
+                alarmMediaPlayer = null
+            } catch (e: Exception) { }
+            
+            // 2. 获取WakeLock确保CPU运行
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            releaseWakeLocks()
+            
+            wakeLock = powerManager.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "nnbw:ReminderAlarm"
+            )
+            wakeLock?.acquire(5 * 60 * 1000L) // 最多5分钟
+            
+            // 3. 点亮屏幕（FULL_WAKE_LOCK在新版已废弃，用SCREEN_BRIGHT_WAKE_LOCK兼容旧版）
+            @Suppress("DEPRECATION")
+            screenWakeLock = powerManager.newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                "nnbw:ReminderScreen"
+            )
+            screenWakeLock?.acquire(30 * 1000L) // 亮屏30秒
+            
+            android.util.Log.d(TAG, "WakeLock已获取(PARTIAL+SCREEN)")
+            
+            // 4. MediaPlayer播放系统闹钟铃声
+            val alarmSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+            
+            alarmMediaPlayer = MediaPlayer().apply {
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)  // 闹钟级别，Doze下也能响
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+                setDataSource(this@ReminderForegroundService, alarmSound)
+                isLooping = true  // 循环播放直到用户确认
+                setVolume(1.0f, 1.0f)  // 最大音量
+                prepare()
+                start()
+            }
+            
+            android.util.Log.d(TAG, "✅ 闹钟铃声已开始播放（MediaPlayer+USAGE_ALARM+循环）")
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "MediaPlayer播放失败，尝试Ringtone备用方案", e)
+            try {
+                val alarmSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                val ringtone = RingtoneManager.getRingtone(this, alarmSound)
+                ringtone.audioAttributes = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+                ringtone.play()
+                android.util.Log.d(TAG, "备用Ringtone方案已启动")
+            } catch (e2: Exception) {
+                android.util.Log.e(TAG, "所有铃声方案都失败", e2)
+            }
+        }
+    }
+
     private fun checkReminders() {
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val now = System.currentTimeMillis()
-        val calendar = Calendar.getInstance()
 
-        // Flutter shared_preferences会在key前加"flutter."前缀
-        // 所以Flutter存的"reminders_xxx"在SP中实际是"flutter.reminders_xxx"
         val allKeys = prefs.all.keys.filter { 
             it.startsWith("${FLUTTER_PREFIX}reminders") 
         }
         var triggeredCount = 0
 
         for (key in allKeys) {
-            // Flutter SP中String值直接用getString读取
             val jsonStr = prefs.getString(key, null) ?: continue
             try {
                 val jsonArray = JSONArray(jsonStr)
@@ -193,9 +319,7 @@ class ReminderForegroundService : Service() {
                     val reminderId = obj.optString("reminder_id", "")
                     val status = obj.optString("status", "")
 
-                    // 只处理pending状态
                     if (status != "pending" && status != "snoozed") continue
-                    // 避免重复触发
                     if (triggeredIds.contains(reminderId)) continue
 
                     val triggerTimeStr = obj.optString("trigger_time", "")
@@ -208,43 +332,42 @@ class ReminderForegroundService : Service() {
                         if (diff >= 0) {
                             val content = obj.optString("content", "提醒")
                             if (diff <= TRIGGER_WINDOW_MS) {
-                                // 到期且在2小时触发窗口内 → 触发响铃
                                 val priority = obj.optString("priority", "normal")
 
-                                // 发送全屏通知+响铃
+                                // 核心：MediaPlayer播放铃声
+                                playAlarmSound()
                                 showReminderNotification(reminderId, content, priority)
-                                
-                                // 更新状态为triggered
                                 obj.put("status", "triggered")
                                 needsSave = true
                                 triggeredIds.add(reminderId)
                                 triggeredCount++
+                                cancelAlarmForReminder(reminderId)
 
-                                android.util.Log.d(TAG, "触发提醒: $content")
+                                android.util.Log.d(TAG, "✅ 触发提醒(Handler轮询): $content")
                             } else {
-                                // v1.0.48: 超过2小时的过期提醒标记为expired
                                 if (status == "pending" || status == "snoozed") {
                                     obj.put("status", "expired")
                                     needsSave = true
                                     android.util.Log.d(TAG, "过期提醒: $content 已过${diff / 3600000}小时")
                                 }
                             }
+                        } else {
+                            // 未来提醒 → 用AlarmManager精确调度
+                            scheduleAlarmForReminder(reminderId, content, triggerTime)
                         }
                     } catch (e: Exception) {
-                        // 时间解析错误，跳过
+                        // 时间解析错误
                     }
                 }
 
-                // 保存更新后的状态
                 if (needsSave) {
                     prefs.edit().putString(key, jsonArray.toString()).apply()
                 }
             } catch (e: Exception) {
-                // JSON解析错误，跳过
+                // JSON解析错误
             }
         }
 
-        // 清理超过2小时的触发记录
         if (triggeredIds.size > 200) {
             triggeredIds.clear()
         }
@@ -253,17 +376,126 @@ class ReminderForegroundService : Service() {
             android.util.Log.d(TAG, "本次检查触发${triggeredCount}条提醒")
         }
 
-        // 更新前台通知显示最后检查时间
         updateForegroundNotification()
     }
 
-    /** 发送全屏提醒通知（带闹钟铃声+振动） */
+    /** 
+     * 用AlarmManager精确调度 — setExactAndAllowWhileIdle
+     * 即使Doze模式也能准时触发
+     */
+    private fun scheduleAlarmForReminder(reminderId: String, content: String, triggerTimeMs: Long) {
+        try {
+            val intent = Intent(this, ReminderForegroundService::class.java).apply {
+                action = ACTION_ALARM_TRIGGER
+                putExtra(EXTRA_REMINDER_ID, reminderId)
+                putExtra(EXTRA_REMINDER_CONTENT, content)
+            }
+            val pendingIntent = PendingIntent.getService(
+                this,
+                reminderId.hashCode() and 0x7FFFFFFF,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerTimeMs,
+                    pendingIntent
+                )
+            } else {
+                alarmManager.setExact(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerTimeMs,
+                    pendingIntent
+                )
+            }
+            android.util.Log.d(TAG, "已调度AlarmManager: $content @ ${Date(triggerTimeMs)}")
+        } catch (e: SecurityException) {
+            android.util.Log.e(TAG, "精确闹钟权限不足，降级为非精确闹钟", e)
+            try {
+                val intent = Intent(this, ReminderForegroundService::class.java).apply {
+                    action = ACTION_ALARM_TRIGGER
+                    putExtra(EXTRA_REMINDER_ID, reminderId)
+                    putExtra(EXTRA_REMINDER_CONTENT, content)
+                }
+                val pendingIntent = PendingIntent.getService(
+                    this,
+                    reminderId.hashCode() and 0x7FFFFFFF,
+                    intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                alarmManager.setAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerTimeMs,
+                    pendingIntent
+                )
+                android.util.Log.d(TAG, "降级调度(非精确): $content")
+            } catch (e2: Exception) {
+                android.util.Log.e(TAG, "降级调度也失败", e2)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "调度AlarmManager失败", e)
+        }
+    }
+
+    private fun cancelAlarmForReminder(reminderId: String) {
+        try {
+            val intent = Intent(this, ReminderForegroundService::class.java).apply {
+                action = ACTION_ALARM_TRIGGER
+            }
+            val pendingIntent = PendingIntent.getService(
+                this,
+                reminderId.hashCode() and 0x7FFFFFFF,
+                intent,
+                PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+            )
+            pendingIntent?.let {
+                alarmManager.cancel(it)
+            }
+        } catch (e: Exception) { }
+    }
+
+    /** 标记提醒为triggered（供AlarmManager触发路径使用） */
+    private fun markReminderTriggered(reminderId: String) {
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val allKeys = prefs.all.keys.filter { it.startsWith("${FLUTTER_PREFIX}reminders") }
+
+        for (key in allKeys) {
+            val jsonStr = prefs.getString(key, null) ?: continue
+            try {
+                val jsonArray = JSONArray(jsonStr)
+                var found = false
+                for (i in 0 until jsonArray.length()) {
+                    val obj = jsonArray.getJSONObject(i)
+                    if (obj.optString("reminder_id") == reminderId) {
+                        obj.put("status", "triggered")
+                        found = true
+                        break
+                    }
+                }
+                if (found) {
+                    prefs.edit().putString(key, jsonArray.toString()).apply()
+                    break
+                }
+            } catch (e: Exception) { }
+        }
+    }
+
+    /** 发送全屏提醒通知（视觉提示，铃声由MediaPlayer负责） */
     private fun showReminderNotification(reminderId: String, content: String, priority: String) {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
-        val intent = packageManager.getLaunchIntentForPackage(packageName)
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
         val pendingIntent = PendingIntent.getActivity(
-            this, reminderId.hashCode() and 0x7FFFFFFF, intent,
+            this, reminderId.hashCode() and 0x7FFFFFFF, launchIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        
+        // "停止铃声"按钮
+        val stopIntent = Intent(ACTION_STOP_ALARM)
+        val stopPendingIntent = PendingIntent.getBroadcast(
+            this, 1, stopIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
@@ -279,21 +511,17 @@ class ReminderForegroundService : Service() {
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setAutoCancel(true)
-            .setTimeoutAfter(120_000) // 2分钟后自动消失
-            .setDefaults(NotificationCompat.DEFAULT_ALL)
-            .setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM))
-            .setVibrate(longArrayOf(0, 500, 200, 500, 200, 500))
+            .setTimeoutAfter(300_000)
+            .setDefaults(NotificationCompat.DEFAULT_VIBRATE)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            // 全屏Intent：锁屏时也能弹出
             .setFullScreenIntent(pendingIntent, true)
+            .addAction(android.R.drawable.ic_media_pause, "停止铃声", stopPendingIntent)
             .build()
 
-        // 使用不同的notificationId避免覆盖
         val notificationId = REMINDER_NOTIFICATION_ID_START + (reminderId.hashCode() and 0xFFF)
         manager.notify(notificationId, notification)
     }
 
-    /** 更新前台服务通知，显示最后检查时间 */
     private fun updateForegroundNotification() {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val sdf = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
@@ -317,9 +545,7 @@ class ReminderForegroundService : Service() {
         manager.notify(NOTIFICATION_ID, notification)
     }
 
-    /** 解析ISO 8601时间字符串为毫秒时间戳 */
     private fun parseIsoTime(isoStr: String): Long {
-        // 处理Flutter的toIso8601String格式：2026-06-03T14:30:00.000
         val clean = isoStr.replace("Z", "").replace("+08:00", "").replace("+00:00", "")
         val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
         sdf.timeZone = TimeZone.getTimeZone("Asia/Shanghai")

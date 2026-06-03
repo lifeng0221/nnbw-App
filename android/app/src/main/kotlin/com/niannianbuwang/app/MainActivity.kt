@@ -34,9 +34,16 @@ class MainActivity : FlutterActivity() {
                             result.error("STOP_FAILED", e.message, null)
                         }
                     }
+                    "stopAlarm" -> {
+                        // v1.0.49: 停止原生MediaPlayer铃声
+                        try {
+                            ReminderForegroundService.stopAlarmSound()
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("STOP_ALARM_FAILED", e.message, null)
+                        }
+                    }
                     "isServiceRunning" -> {
-                        // 简单判断：服务进程存在即认为运行中
-                        // 更精确的判断需要用SharedPreferences或广播
                         result.success(true)
                     }
                     else -> result.notImplemented()
