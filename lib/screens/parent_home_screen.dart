@@ -159,27 +159,26 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     await _checkBatteryOptimization();
   }
   
-  /// v1.0.44: 暂时禁用后台服务（导致闪退，待修复后重新启用）
+  /// v1.0.45: 启动原生Kotlin前台服务（替换flutter_background_service）
   Future<void> _startBackgroundService() async {
-    print('🟡 后台服务暂时禁用（v1.0.44）');
-    // try {
-    //   final running = await _backgroundService.checkRunning();
-    //   if (running) {
-    //     setState(() => _backgroundServiceRunning = true);
-    //     print('🟢 后台服务已在运行');
-    //     return;
-    //   }
-    //   final success = await _backgroundService.startService();
-    //   if (mounted) {
-    //     setState(() => _backgroundServiceRunning = success);
-    //   }
-    //   print('🟢 后台服务启动: $success');
-    // } catch (e) {
-    //   print('🔴 后台服务启动失败: $e');
-    //   if (mounted) {
-    //     setState(() => _backgroundServiceRunning = false);
-    //   }
-    // }
+    try {
+      final running = await _backgroundService.checkRunning();
+      if (running) {
+        setState(() => _backgroundServiceRunning = true);
+        print('🟢 原生前台服务已在运行');
+        return;
+      }
+      final success = await _backgroundService.startService();
+      if (mounted) {
+        setState(() => _backgroundServiceRunning = success);
+      }
+      print('🟢 原生前台服务启动: $success');
+    } catch (e) {
+      print('🔴 原生前台服务启动失败: $e');
+      if (mounted) {
+        setState(() => _backgroundServiceRunning = false);
+      }
+    }
   }
   
   /// v1.0.40: 检查并引导电池优化

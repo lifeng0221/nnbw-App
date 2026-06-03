@@ -2,7 +2,7 @@ name: nian_nian_bu_wang
 description: 念念不忘 - 老人极简语音提醒+子女协同
 
 publish_to: 'none'
-version: 1.0.44
+version: 1.0.45
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -26,7 +26,7 @@ dependencies:
   
   # 通知与闹钟
   flutter_local_notifications: ^18.0.1
-  flutter_background_service: ^5.1.0
+  # v1.0.45: 移除flutter_background_service（导致闪退），改用原生Kotlin前台服务
   
   # 推送
 

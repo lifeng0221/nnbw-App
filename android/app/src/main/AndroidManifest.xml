@@ -1,39 +1,40 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
     
+    <!-- 闹钟与唤醒 -->
     <uses-permission android:name="android.permission.SET_ALARM"/>
-    
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
-    
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
-    
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
-    
     <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
     
+    <!-- 音频录制 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     
+    <!-- 通知权限 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     
+    <!-- 前台服务 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
-    
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
     
+    <!-- 全屏Intent（锁屏弹出） -->
     <uses-permission android:name="android.permission.FULL_SCREEN_INTENT"/>
     
+    <!-- 网络 -->
     <uses-permission android:name="android.permission.INTERNET"/>
     
+    <!-- 振动 -->
     <uses-permission android:name="android.permission.VIBRATE"/>
     
+    <!-- 电池优化豁免 -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
-    
     
     <application
         android:label="念念不忘"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">
-        
         
         <activity
             android:name=".MainActivity"
@@ -55,13 +56,13 @@
             </intent-filter>
         </activity>
 
-        <!-- flutter_background_service 前台服务 -->
+        <!-- 原生提醒守护前台服务 -->
         <service
-            android:name="id.flutter.flutter_background_service.BackgroundService"
+            android:name=".ReminderForegroundService"
             android:foregroundServiceType="specialUse"
             android:exported="false"
-            android:stopWithTask="true"
-            tools:replace="android:foregroundServiceType,android:exported,android:stopWithTask">
+            android:stopWithTask="false"
+            android:enabled="true">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Reminder monitoring service for elderly care app" />
         </service>
