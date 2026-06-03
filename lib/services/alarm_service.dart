@@ -36,7 +36,7 @@ class AlarmService {
   bool get notificationReady => _notificationReady;
   bool get isRunning => _checkTimer != null && _checkTimer!.isActive;
   int get monitoredCount => _reminders.length;
-  int get pendingCount => _reminders.where((r) => r.status == 'pending' || r.status == 'snoozed').length;
+  int get pendingCount => _reminders.where((r) => r.status == 'pending' || r.status == 'confirmed' || r.status == 'snoozed').length;
   DateTime? lastCheckTime;
   String? lastCheckResult;
   int triggerCount = 0;
@@ -170,7 +170,7 @@ class AlarmService {
     
     for (int i = 0; i < _reminders.length; i++) {
       final r = _reminders[i];
-      if (r.status != 'pending' && r.status != 'snoozed') continue;
+      if (r.status != 'pending' && r.status != 'confirmed' && r.status != 'snoozed') continue;
       pendingCount++;
       if (_triggeredIds.contains(r.reminderId)) { alreadyTriggeredCount++; continue; }
       
@@ -219,7 +219,7 @@ class AlarmService {
         print('🟢   → 触发: "${r.content}" trigger=${r.triggerTime} diff=${diff.inMinutes}分钟');
       }
       for (final r in _reminders) {
-        if (r.status == 'pending' || r.status == 'snoozed') {
+        if (r.status == 'pending' || r.status == 'confirmed' || r.status == 'snoozed') {
           final diff = now.difference(r.triggerTime);
           print('🟢   → 待响: "${r.content}" trigger=${r.triggerTime} ${diff.isNegative ? "还${-diff.inMinutes}分钟" : "已过${diff.inMinutes}分钟"}');
         }
@@ -279,7 +279,7 @@ class AlarmService {
 
     // 3. 播放铃声（降级：失败不阻塞）
     try {
-      await playAlarmSound(isUrgent: reminder.isUrgent);
+      await playAlarmSound(isUrgent: reminder.isUrgent, content: reminder.content);
     } catch (e) {
       print('🔴 铃声播放失败（不影响状态）: $e');
     }
@@ -329,12 +329,12 @@ class AlarmService {
     }
   }
 
-  Future<void> playAlarmSound({bool isUrgent = false}) async {
-    print('🟢 播放铃声: isUrgent=$isUrgent');
+  Future<void> playAlarmSound({bool isUrgent = false, String content = '提醒时间到了'}) async {
+    print('🟢 播放铃声: isUrgent=$isUrgent, content=$content');
     
     // v1.0.49: 优先用原生MediaPlayer（USAGE_ALARM，息屏/Doze下也能响）
     try {
-      await _platformChannel.invokeMethod('playAlarm');
+      await _platformChannel.invokeMethod('playAlarm', {'content': content});
       print('🟢 原生MediaPlayer铃声播放成功（USAGE_ALARM）');
       return; // 原生播放成功，不再用Flutter audioplayers
     } catch (e) {

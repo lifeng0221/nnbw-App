@@ -1,6 +1,5 @@
 package com.niannianbuwang.app
 
-import android.content.Context
 import android.content.Intent
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -35,10 +34,13 @@ class MainActivity : FlutterActivity() {
                         }
                     }
                     "playAlarm" -> {
-                        // v1.0.49: Flutter侧触发提醒时，调用原生MediaPlayer播放闹钟铃声
-                        // 关键：Flutter audioplayers在息屏时播不了，必须走原生USAGE_ALARM
                         try {
-                            ReminderForegroundService.playAlarmFromFlutter(this)
+                            val content = call.argument<String>("content") ?: "提醒时间到了"
+                            val intent = Intent(this, ReminderForegroundService::class.java).apply {
+                                action = "PLAY_ALARM"
+                                putExtra("reminder_content", content)
+                            }
+                            startService(intent)
                             result.success(true)
                         } catch (e: Exception) {
                             result.error("PLAY_ALARM_FAILED", e.message, null)
