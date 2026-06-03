@@ -418,7 +418,16 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     }
 
     var bindings = await _storage.getBindings(appState.userId!);
-    // v1.0.46: 移除test_binding兜底逻辑——已绑定后不需要，且test_binding下的提醒无法同步服务器
+    // v1.0.51: 有serverBindingId但本地绑定列表为空时，构造绑定以加载提醒
+    if (bindings.isEmpty && _serverBindingId != null) {
+      final binding = BindingModel(
+        bindingId: _serverBindingId.toString(),
+        parentId: appState.userId!, childId: '',
+        status: 'active', createdAt: DateTime.now()
+      );
+      bindings = [binding];
+      print('🟢 长辈端: 无本地绑定但有serverBindingId=$_serverBindingId，构造绑定');
+    }
     if (bindings.isEmpty) {
       setState(() { _todayReminders = []; _isLoading = false; });
       _alarmService.startChecking([]);
@@ -434,6 +443,18 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
         if (!seenIds.contains(r.reminderId)) {
           allReminders.add(r);
           seenIds.add(r.reminderId);
+        }
+      }
+    }
+
+    // v1.0.51: 也尝试从serverBindingId加载提醒（防止本地bindingId不匹配导致遗漏）
+    if (_serverBindingId != null && !seenIds.isNotEmpty) {
+      final serverReminders = await _storage.getReminders(_serverBindingId.toString());
+      for (final r in serverReminders) {
+        if (!seenIds.contains(r.reminderId)) {
+          allReminders.add(r);
+          seenIds.add(r.reminderId);
+          print('🟢 长辈端: 从serverBindingId加载遗漏提醒: ${r.content}');
         }
       }
     }

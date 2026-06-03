@@ -2,7 +2,7 @@ name: nian_nian_bu_wang
 description: 念念不忘 - 老人极简语音提醒+子女协同
 
 publish_to: 'none'
-version: 1.0.50
+version: 1.0.51
 
 environment:
   sdk: '>=3.0.0 <4.0.0'

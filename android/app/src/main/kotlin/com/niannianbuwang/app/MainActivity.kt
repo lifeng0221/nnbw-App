@@ -1,6 +1,7 @@
 package com.niannianbuwang.app
 
 import android.content.Intent
+import android.os.Build
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -56,6 +57,20 @@ class MainActivity : FlutterActivity() {
                     }
                     "isServiceRunning" -> {
                         result.success(true)
+                    }
+                    // v1.0.51: Flutter通知Kotlin立即调度所有未来闹钟
+                    "scheduleAlarms" -> {
+                        try {
+                            val intent = Intent(this, ReminderForegroundService::class.java).apply {
+                                action = "com.niannianbuwang.app.SCHEDULE_ALL"
+                            }
+                            startService(intent)
+                            android.util.Log.d("MainActivity", "已请求调度全部闹钟")
+                            result.success(true)
+                        } catch (e: Exception) {
+                            android.util.Log.e("MainActivity", "调度闹钟失败", e)
+                            result.error("SCHEDULE_FAILED", e.message, null)
+                        }
                     }
                     else -> result.notImplemented()
                 }

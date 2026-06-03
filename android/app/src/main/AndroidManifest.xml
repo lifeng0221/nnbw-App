@@ -19,7 +19,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
     
     <!-- 全屏Intent（锁屏弹出） -->
-    <uses-permission android:name="android.permission.FULL_SCREEN_INTENT"/>
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
     
     <!-- 网络 -->
     <uses-permission android:name="android.permission.INTERNET"/>
@@ -67,8 +67,25 @@
                 android:value="Reminder monitoring service for elderly care app" />
         </service>
         
-        <meta-data android:name="flutterEmbedding" android:value="2"/>
-    <!-- v1.0.50: 全屏闹铃Activity -->
+        <!-- v1.0.51: 闹钟触发广播接收器 -->
+        <receiver
+            android:name=".AlarmReceiver"
+            android:exported="false"
+            android:enabled="true" />
+        
+        <!-- v1.0.51: 开机自启广播接收器 -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true"
+            android:enabled="true"
+            android:directBootAware="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED"/>
+            </intent-filter>
+        </receiver>
+        
+        <!-- v1.0.50: 全屏闹铃Activity -->
         <activity
             android:name=".AlarmActivity"
             android:exported="false"
@@ -79,5 +96,7 @@
             android:taskAffinity=""
             android:launchMode="singleInstance"
         />
+        
+        <meta-data android:name="flutterEmbedding" android:value="2"/>
     </application>
 </manifest>

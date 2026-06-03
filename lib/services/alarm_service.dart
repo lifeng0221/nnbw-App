@@ -123,6 +123,7 @@ class AlarmService {
       print('🟢 AlarmService: 启动10秒轮询');
     }
     _checkReminders();
+    _scheduleKotlinAlarms(); // v1.0.51: 立即调度Kotlin闹钟
     _notifyDiagnostic();
   }
 
@@ -134,6 +135,7 @@ class AlarmService {
 
   void updateReminders(List<ReminderModel> reminders) {
     _reminders = List.from(reminders);
+    _scheduleKotlinAlarms(); // v1.0.51: 提醒更新后重新调度Kotlin闹钟
     _notifyDiagnostic();
   }
 
@@ -370,6 +372,17 @@ class AlarmService {
       print('🟢 已停止原生闹钟铃声');
     } catch (e) {
       print('🟡 停止原生铃声失败（可能未在播放）: $e');
+    }
+  }
+
+  /// v1.0.51: 通知Kotlin立即调度所有未来提醒的AlarmManager闹钟
+  /// 确保息屏时也能通过AlarmManager唤醒设备
+  void _scheduleKotlinAlarms() {
+    try {
+      _platformChannel.invokeMethod('scheduleAlarms');
+      print('🟢 已请求Kotlin调度全部闹钟');
+    } catch (e) {
+      print('🔴 调度Kotlin闹钟失败: \$e');
     }
   }
 
