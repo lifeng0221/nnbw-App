@@ -206,9 +206,9 @@ class ReminderForegroundService : Service() {
                         val diff = now - triggerTime
 
                         if (diff >= 0) {
+                            val content = obj.optString("content", "提醒")
                             if (diff <= TRIGGER_WINDOW_MS) {
                                 // 到期且在2小时触发窗口内 → 触发响铃
-                                val content = obj.optString("content", "提醒")
                                 val priority = obj.optString("priority", "normal")
 
                                 // 发送全屏通知+响铃
