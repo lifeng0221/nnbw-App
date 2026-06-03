@@ -4,12 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../main.dart';
 import '../models/app_models.dart';
 import '../services/api_service.dart';
 import '../services/local_storage_service.dart';
 import '../services/voice_service.dart';
 import '../services/alarm_service.dart';
+import '../services/background_reminder_service.dart';
 import '../widgets/simple_time_picker.dart';
 import 'bind_screen.dart';
 import 'login_screen.dart';
@@ -38,6 +40,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
   final VoiceService _voiceService = VoiceService();
   final LocalStorageService _storage = LocalStorageService();
   final AlarmService _alarmService = AlarmService();
+  final BackgroundReminderService _backgroundService = BackgroundReminderService();
   final ApiService _apiService = ApiService();
   final TextEditingController _textController = TextEditingController();
   final AudioPlayer _audioPlayer = AudioPlayer();
@@ -46,6 +49,10 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
   // 同步状态
   bool _isSyncing = false;
   int? _serverBindingId; // 后端binding_id（整数）
+  
+  // 后台服务状态
+  bool _backgroundServiceRunning = false;
+  bool _batteryOptimizationDone = false;
 
   // Bug 1 修复: 使用GlobalKey控制Scaffold
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
@@ -143,6 +150,126 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     // Step 7: 启动定时器
     _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => _loadReminders());
     _serverSyncTimer = Timer.periodic(const Duration(seconds: 60), (_) => _syncFromServer());
+    
+    // Step 8: v1.0.40 启动后台前台服务保活
+    await _startBackgroundService();
+    
+    // Step 9: v1.0.40 检查电池优化引导
+    await _checkBatteryOptimization();
+  }
+  
+  /// v1.0.40: 启动后台前台服务
+  Future<void> _startBackgroundService() async {
+    try {
+      final success = await _backgroundService.startService();
+      setState(() => _backgroundServiceRunning = success);
+      print('🟢 后台服务启动: $success');
+    } catch (e) {
+      print('🔴 后台服务启动失败: $e');
+      setState(() => _backgroundServiceRunning = false);
+    }
+  }
+  
+  /// v1.0.40: 检查并引导电池优化
+  Future<void> _checkBatteryOptimization() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _batteryOptimizationDone = prefs.getBool('battery_optimization_done') ?? false;
+      
+      if (!_batteryOptimizationDone) {
+        // 首次启动，延迟显示引导（等首页加载完成）
+        await Future.delayed(const Duration(seconds: 3));
+        if (mounted) {
+          _showBatteryOptimizationDialog();
+        }
+      }
+    } catch (e) {
+      print('🔴 检查电池优化状态失败: $e');
+    }
+  }
+  
+  /// v1.0.40: 电池优化引导弹窗
+  void _showBatteryOptimizationDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: Row(children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+            child: const Icon(Icons.battery_charging_full, color: AppColors.primary, size: 28),
+          ),
+          const SizedBox(width: 12),
+          const Text('开启后台保护', style: TextStyle(fontSize: 22, color: AppColors.textDark)),
+        ]),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('为了确保提醒准时响起，需要关闭电池优化：', style: TextStyle(fontSize: 16, color: AppColors.textDark)),
+          const SizedBox(height: 16),
+          _buildStep('1', '点击下方「去设置」按钮'),
+          const SizedBox(height: 8),
+          _buildStep('2', '找到「念念不忘」APP'),
+          const SizedBox(height: 8),
+          _buildStep('3', '选择「不优化」或「无限制」'),
+          const SizedBox(height: 8),
+          _buildStep('4', '确认完成设置'),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: Colors.amber.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+            child: Row(children: [
+              const Icon(Icons.info_outline, color: Colors.amber, size: 20),
+              const SizedBox(width: 8),
+              Expanded(child: Text('开启后APP在后台也能正常提醒，不会漏掉任何重要提醒', style: TextStyle(fontSize: 13, color: Colors.amber[800]))),
+            ]),
+          ),
+        ]),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _dismissBatteryOptimization();
+            },
+            child: const Text('暂不设置', style: TextStyle(fontSize: 16, color: AppColors.textSecondary)),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              // 打开电池优化设置页面
+              await Permission.location.request();
+              // 尝试打开电池设置
+              try {
+                await openAppSettings();
+              } catch (e) {
+                print('无法打开设置页面: $e');
+              }
+              _dismissBatteryOptimization();
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
+            child: const Text('去设置', style: TextStyle(fontSize: 16)),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildStep(String num, String text) {
+    return Row(children: [
+      Container(
+        width: 24, height: 24,
+        decoration: BoxDecoration(color: AppColors.primary, borderRadius: BorderRadius.circular(12)),
+        child: Center(child: Text(num, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold))),
+      ),
+      const SizedBox(width: 10),
+      Text(text, style: const TextStyle(fontSize: 15, color: AppColors.textDark)),
+    ]);
+  }
+  
+  Future<void> _dismissBatteryOptimization() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('battery_optimization_done', true);
+    setState(() => _batteryOptimizationDone = true);
   }
 
   /// 从后端同步数据到本地（每60秒调用一次 + 首次启动）
@@ -1099,19 +1226,33 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     );
   }
 
-  /// v1.0.28: 闹钟诊断信息条
+  /// v1.0.28: 闹钟诊断信息条（v1.0.40添加后台服务状态）
   Widget _buildDiagnosticBar() {
     final alarm = _alarmService;
     final hasError = !alarm.isInitialized || !alarm.isRunning || alarm.monitoredCount == 0;
     final color = hasError ? Colors.red : (alarm.notificationReady ? Colors.green : Colors.orange);
     final icon = hasError ? Icons.error : (alarm.notificationReady ? Icons.check_circle : Icons.warning);
-    final text = alarm.diagnosticText;
+    
+    // v1.0.40: 后台服务状态
+    final bgColor = _backgroundServiceRunning ? Colors.blue : Colors.grey;
+    final bgIcon = _backgroundServiceRunning ? Icons.shield : Icons.shield_outlined;
+    final bgText = _backgroundServiceRunning ? '守护:运行中' : '守护:未启动';
+    
+    final text = '${alarm.diagnosticText} | $bgText';
     
     return GestureDetector(
       onTap: () {
         showDialog(context: context, builder: (ctx) => AlertDialog(
           title: const Text('闹钟诊断', style: TextStyle(fontSize: 22)),
           content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            // v1.0.40: 后台服务诊断
+            const Divider(),
+            const Text('后台守护服务', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blue)),
+            _diagRow('守护服务', _backgroundServiceRunning ? '✅ 运行中' : '❌ 未启动'),
+            _diagRow('电池优化', _batteryOptimizationDone ? '✅ 已设置' : '⚠️ 未设置'),
+            _diagRow('守护说明', _backgroundServiceRunning ? '息屏时也能响铃' : '建议开启后台保护'),
+            const Divider(),
+            const Text('闹钟轮询', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             _diagRow('轮询初始化', alarm.isInitialized ? '✅ 完成' : '❌ 未完成'),
             _diagRow('通知插件', alarm.notificationReady ? '✅ 就绪' : '❌ 未就绪'),
             _diagRow('轮询运行', alarm.isRunning ? '✅ 运行中' : '❌ 未启动'),
@@ -1119,6 +1260,8 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
             _diagRow('待响提醒', '${alarm.pendingCount}条'),
             _diagRow('已触发次数', '${alarm.triggerCount}次'),
             _diagRow('上次检查', alarm.lastCheckTime != null ? alarm.lastCheckTime.toString().substring(11, 19) : '无'),
+            const Divider(),
+            const Text('其他信息', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             _diagRow('初始化错误', alarm.initError ?? '无'),
             _diagRow('serverBindingId', _serverBindingId?.toString() ?? '❌ 未获取'),
             _diagRow('userId', context.read<AppState>().userId ?? '无'),
@@ -1140,8 +1283,8 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
             const SizedBox(height: 12),
             const Text('如果"监听提醒"为0：提醒数据没传给闹钟', style: TextStyle(color: Colors.red, fontSize: 14)),
             const Text('如果"serverBindingId"未获取：未绑定或绑定未持久化', style: TextStyle(color: Colors.red, fontSize: 14)),
-            const Text('如果"通知插件"未就绪：到点不会弹通知，但状态会变', style: TextStyle(color: Colors.orange, fontSize: 14)),
-            const Text('v1.0.31: 修复绑定选取+移除Mock降级+超时30s', style: TextStyle(color: Colors.green, fontSize: 14)),
+            const Text('如果"守护服务"未启动：息屏时可能无法响铃', style: TextStyle(color: Colors.orange, fontSize: 14)),
+            const Text('v1.0.40: 前台服务保活+全屏通知+电池优化引导', style: TextStyle(color: Colors.green, fontSize: 14)),
           ])),
           actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭'))],
         ));
@@ -1196,6 +1339,34 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
                 print('🟢 长辈端: 绑定成功返回，重新同步');
                 await _syncFromServer();
               }
+            },
+          ),
+          // v1.0.40: 守护服务状态
+          ListTile(
+            leading: Icon(_backgroundServiceRunning ? Icons.shield : Icons.shield_outlined, color: _backgroundServiceRunning ? Colors.blue : AppColors.textSecondary),
+            title: Text(
+              '守护服务',
+              style: TextStyle(fontSize: 18, color: _backgroundServiceRunning ? Colors.blue : AppColors.textSecondary),
+            ),
+            subtitle: Text(
+              _backgroundServiceRunning ? '运行中 - 息屏也能响铃' : '未启动 - 可能漏掉提醒',
+              style: TextStyle(fontSize: 13, color: _backgroundServiceRunning ? Colors.blue[700] : Colors.red),
+            ),
+            trailing: _backgroundServiceRunning 
+                ? const Icon(Icons.check_circle, color: Colors.blue)
+                : IconButton(
+                    icon: const Icon(Icons.refresh, color: Colors.orange),
+                    onPressed: () async {
+                      Navigator.pop(context);
+                      await _startBackgroundService();
+                      setState(() {});
+                    },
+                  ),
+            onTap: () async {
+              Navigator.pop(context);
+              // 点击后尝试重启服务
+              await _startBackgroundService();
+              if (mounted) setState(() {});
             },
           ),
           ListTile(

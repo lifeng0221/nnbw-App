@@ -251,6 +251,8 @@ class AlarmService {
 
   Future<void> showReminderNotification(ReminderModel reminder) async {
     if (!_notificationReady) return;
+    
+    // v1.0.40: 增强通知配置，支持全屏Intent
     const androidDetails = AndroidNotificationDetails(
       'reminder_channel', '提醒通知',
       channelDescription: '到点提醒通知',
@@ -258,11 +260,24 @@ class AlarmService {
       priority: Priority.max,
       playSound: true,
       enableVibration: true,
+      // v1.0.40: 锁屏全屏弹出
+      fullScreenIntent: true,
+      category: AndroidNotificationCategory.alarm,
+      visibility: NotificationVisibility.public,
+      // v1.0.40: 超时自动消失
+      timeoutAfter: 60000, // 1分钟
+      styleInformation: BigTextStyleInformation(
+        reminder.content,
+        contentTitle: '⏰ 念念不忘提醒',
+        summaryText: '点击查看详情',
+      ),
     );
     const details = NotificationDetails(android: androidDetails, iOS: DarwinNotificationDetails());
     try {
+      // v1.0.40: 使用不同的通知ID范围，避免与后台服务冲突
+      final notificationId = reminder.reminderId.hashCode.abs() % 100000;
       await _notifications.show(
-        reminder.reminderId.hashCode,
+        notificationId,
         '⏰ 念念不忘提醒',
         reminder.content,
         details,
