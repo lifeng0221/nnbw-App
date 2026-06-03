@@ -213,12 +213,18 @@ class BackgroundReminderService {
 
   bool _isRunning = false;
   bool get isRunning => _isRunning;
+  bool _configured = false;
 
-  /// 初始化并配置服务（在主isolate中调用）
+  /// 初始化并配置服务（在主isolate中调用，幂等——多次调用安全）
   Future<void> initialize() async {
+    if (_configured) {
+      print('[Service] 已配置，跳过');
+      return;
+    }
     print('[Service] BackgroundReminderService 配置');
 
-    await _service.configure(
+    try {
+      await _service.configure(
       androidConfiguration: AndroidConfiguration(
         onStart: onStart,
         isForegroundMode: true,
@@ -235,7 +241,12 @@ class BackgroundReminderService {
       ),
     );
 
+    _configured = true;
     print('[Service] 服务配置完成');
+    } catch (e) {
+      print('[Service] 服务配置异常: $e');
+      // 不抛出，让主流程继续
+    }
   }
 
   /// iOS后台处理

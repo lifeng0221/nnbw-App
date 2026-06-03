@@ -162,15 +162,23 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
   /// v1.0.40: 启动后台前台服务
   Future<void> _startBackgroundService() async {
     try {
-      // 先配置（在主isolate中调用configure）
-      await _backgroundService.initialize();
-      // 再启动
+      // 只启动，不重复configure（configure在main()中已完成）
+      final running = await _backgroundService.checkRunning();
+      if (running) {
+        setState(() => _backgroundServiceRunning = true);
+        print('🟢 后台服务已在运行');
+        return;
+      }
       final success = await _backgroundService.startService();
-      setState(() => _backgroundServiceRunning = success);
+      if (mounted) {
+        setState(() => _backgroundServiceRunning = success);
+      }
       print('🟢 后台服务启动: $success');
     } catch (e) {
       print('🔴 后台服务启动失败: $e');
-      setState(() => _backgroundServiceRunning = false);
+      if (mounted) {
+        setState(() => _backgroundServiceRunning = false);
+      }
     }
   }
   

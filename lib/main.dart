@@ -7,13 +7,20 @@ import 'screens/bind_screen.dart';
 import 'screens/login_screen.dart';
 import 'services/api_service.dart';
 import 'services/alarm_service.dart';
+import 'services/background_reminder_service.dart';
 
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // 🔧 v1.0.27: 移除此处的AlarmService.init()
-  // 通知插件需要Flutter引擎完全就绪后才能初始化
-  // 改为在首页initState中初始化
+  
+  // v1.0.43: 在main中初始化前台服务配置（只执行一次，避免重复configure导致崩溃）
+  try {
+    await BackgroundReminderService().initialize();
+    print('🟢 前台服务配置完成');
+  } catch (e) {
+    print('🔴 前台服务配置失败（不影响主流程）: $e');
+  }
+  
   runApp(
     MultiProvider(
       providers: [
