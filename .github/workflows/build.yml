@@ -53,10 +53,20 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: |
           VERSION=$(grep 'version:' pubspec.yaml | head -1 | awk '{print $2}')
+          echo "version=$VERSION"
+          
+          # 如果release已存在，删除重建；否则创建新release
+          if gh release view "v$VERSION" --repo lifeng0221/nnbw-App > /dev/null 2>&1; then
+            echo "Release v$VERSION exists, deleting..."
+            gh release delete "v$VERSION" --yes --repo lifeng0221/nnbw-App
+          fi
           echo "Creating release v$VERSION"
-          # 先删掉已有的空release，再创建新的
-          gh release delete "v$VERSION" --yes || true
           gh release create "v$VERSION" \
-            "build/app/outputs/flutter-apk/app-release.apk" \
             --title "念念不忘 v$VERSION" \
-            --notes "念念不忘 v$VERSION"
+            --notes "念念不忘 v$VERSION" \
+            --repo lifeng0221/nnbw-App
+          echo "Uploading APK..."
+          gh release upload "v$VERSION" \
+            "build/app/outputs/flutter-apk/app-release.apk" \
+            --repo lifeng0221/nnbw-App \
+            --clobber
