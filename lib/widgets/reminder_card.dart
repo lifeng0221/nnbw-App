@@ -97,7 +97,7 @@ class ReminderCard extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             
-            // 第三行：来源 + 分类
+            // 第三行：来源 + 分类 + 确认状态（子女端可见）
             Row(
               children: [
                 _buildTag(
@@ -112,6 +112,11 @@ class ReminderCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 6),
                 _buildTag(reminder.category, Colors.grey[100]!, Colors.grey),
+                // v1.0.60: 子女端显示老人已确认标签
+                if (!isParent && reminder.status == 'confirmed') ...[
+                  const SizedBox(width: 6),
+                  _buildTag('✅ 老人已确认', Colors.green[100]!, Colors.green[700]!),
+                ],
               ],
             ),
             
