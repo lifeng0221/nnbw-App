@@ -51,6 +51,8 @@ jobs:
       
       - name: Create Release
         if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           VERSION=$(grep 'version:' pubspec.yaml | head -1 | awk '{print $2}')
           echo "version=$VERSION"
