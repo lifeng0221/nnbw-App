@@ -112,10 +112,18 @@ class ReminderCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 6),
                 _buildTag(reminder.category, Colors.grey[100]!, Colors.grey),
-                // v1.0.60: 子女端显示老人已确认标签
+                // v1.0.60: 子女端显示老人确认状态
                 if (!isParent && reminder.status == 'confirmed') ...[
                   const SizedBox(width: 6),
                   _buildTag('✅ 老人已确认', Colors.green[100]!, Colors.green[700]!),
+                ] else if (!isParent && reminder.status == 'triggered') ...[
+                  // v1.0.60: 触发超过30分钟未确认，显示超时警告
+                  DateTime now = DateTime.now();
+                  Duration elapsed = now.difference(reminder.triggerTime);
+                  if (elapsed.inMinutes >= 30) ...[
+                    const SizedBox(width: 6),
+                    _buildTag('⚠️ 未确认', Colors.orange[100]!, Colors.orange[700]!),
+                  ],
                 ],
               ],
             ),
