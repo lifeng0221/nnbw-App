@@ -32,34 +32,31 @@ jobs:
         run: flutter pub get
       
       - name: Build APK
-        run: flutter build apk --release 2>&1 | tee build.log
-      
+        run: |
+          flutter build apk --release 2>&1 | tee build.log
+          echo "=== APK Size ==="
+          ls -lh build/app/outputs/flutter-apk/app-release.apk 2>/dev/null || echo "APK NOT FOUND"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: app-release
           path: build/app/outputs/flutter-apk/app-release.apk
 
       - name: Upload build log
         uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: build-log
           path: build.log
       
-      - name: Get version
-        id: version
+      - name: Create Release
+        if: github.ref == 'refs/heads/main'
         run: |
           VERSION=$(grep 'version:' pubspec.yaml | head -1 | awk '{print $2}')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Building version: $VERSION"
-      
-      - name: Create Release
-        if: github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: v${{ steps.version.outputs.version }}
-          files: build/app/outputs/flutter-apk/app-release.apk
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          echo "Creating release v$VERSION"
+          # 直接上传APK到release（比action更可靠）
+          gh release create "v$VERSION" \
+            "build/app/outputs/flutter-apk/app-release.apk" \
+            --title "念念不忘 v$VERSION" \
+            --notes "念念不忘 v$VERSION"
