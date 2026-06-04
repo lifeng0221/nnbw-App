@@ -16,7 +16,21 @@ class LocalStorageService {
     _prefs ??= await SharedPreferences.getInstance();
     return _prefs!;
   }
-  
+
+  // ==================== 通用键值存储 ====================
+
+  /// v1.0.54: 通用字符串存取（用于引导弹窗等简单状态）
+  Future<bool> setString(String key, String value) async {
+    final prefs = await _preferences;
+    return prefs.setString('gs_$key', value);
+  }
+
+  /// v1.0.54: 通用字符串读取
+  Future<String?> getString(String key) async {
+    final prefs = await _preferences;
+    return prefs.getString('gs_$key');
+  }
+
   // ==================== serverBindingId持久化 ====================
   
   /// v1.0.29: 持久化serverBindingId到SharedPreferences
