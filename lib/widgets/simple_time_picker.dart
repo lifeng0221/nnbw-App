@@ -34,12 +34,29 @@ class SimpleTimePicker extends StatefulWidget {
 class _SimpleTimePickerState extends State<SimpleTimePicker> {
   late int _hour;
   late int _minute;
+  bool _isPM = false; // true=下午，false=上午（默认下午，兼容用户说"3点"≈下午3点的习惯）
 
   @override
   void initState() {
     super.initState();
     _hour = widget.initialTime.hour;
     _minute = widget.initialTime.minute;
+    // 如果是下午时段（13-23点），默认勾选下午
+    _isPM = _hour >= 13;
+    // 统一转为12小时制显示
+    if (_hour == 0) {
+      _hour = 12;
+    } else if (_hour > 12) {
+      _hour = _hour - 12;
+    }
+  }
+
+  /// 把12小时制显示值转为24小时制
+  int _to24Hour(int displayHour, bool isPM) {
+    if (displayHour == 12) {
+      return isPM ? 12 : 0; // 12 PM=12, 12 AM=0
+    }
+    return isPM ? displayHour + 12 : displayHour;
   }
 
   String _f(int v) => v.toString().padLeft(2, '0');
@@ -89,7 +106,7 @@ class _SimpleTimePickerState extends State<SimpleTimePicker> {
               ),
               child: Column(
                 children: [
-                  // 大号时间显示
+                  // 大号时间显示（带上下午标识）
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -115,7 +132,23 @@ class _SimpleTimePickerState extends State<SimpleTimePicker> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
+                  // 上下午大标签
+                  Container(
+                    margin: const EdgeInsets.only(top: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: _isPM ? Colors.deepOrange.withOpacity(0.15) : Colors.blue.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      _isPM ? '下午' : '上午',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: _isPM ? Colors.deepOrange : Colors.blue,
+                      ),
+                    ),
+                  ),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -140,8 +173,8 @@ class _SimpleTimePickerState extends State<SimpleTimePicker> {
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Text(
-                          _f(_hour),
-                          style: const TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold),
+                          _isPM ? '下午 ${_f(_hour)}' : '上午 ${_f(_hour)}',
+                          style: const TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.bold),
                         ),
                       ),
                     ],
@@ -157,14 +190,23 @@ class _SimpleTimePickerState extends State<SimpleTimePicker> {
                     ),
                     child: Slider(
                       value: _hour.toDouble(),
-                      min: 0,
-                      max: 23,
-                      divisions: 23,
+                      min: 1,
+                      max: 12,
+                      divisions: 11,
                       onChanged: (v) => setState(() => _hour = v.round()),
                     ),
                   ),
-
                   const SizedBox(height: 8),
+
+                  // AM/PM 切换按钮
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _buildAmPmButton('上午', !_isPM, () => setState(() => _isPM = false)),
+                      const SizedBox(width: 16),
+                      _buildAmPmButton('下午', _isPM, () => setState(() => _isPM = true)),
+                    ],
+                  ),
 
                   // 分钟滑动条
                   Row(
@@ -220,7 +262,9 @@ class _SimpleTimePickerState extends State<SimpleTimePicker> {
                 _buildQuickButton('1小时后', () => _quickMinutes(60)),
                 _buildQuickButton('早上8点', () => _quickTime(8, 0)),
                 _buildQuickButton('中午12点', () => _quickTime(12, 0)),
-                _buildQuickButton('晚上8点', () => _quickTime(20, 0)),
+                _buildQuickButton('下午3点', () { setState(() { _hour = 3; _isPM = true; }); }),
+                _buildQuickButton('下午6点', () { setState(() { _hour = 6; _isPM = true; }); }),
+                _buildQuickButton('晚上8点', () { setState(() { _hour = 8; _isPM = true; }); }),
               ],
             ),
             const SizedBox(height: 16),
@@ -230,7 +274,7 @@ class _SimpleTimePickerState extends State<SimpleTimePicker> {
               width: double.infinity,
               height: 56,
               child: ElevatedButton(
-                onPressed: () => widget.onTimeSelected(TimeOfDay(hour: _hour, minute: _minute)),
+                onPressed: () => widget.onTimeSelected(TimeOfDay(hour: _to24Hour(_hour, _isPM), minute: _minute)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: WarmColors.primary,
                   foregroundColor: Colors.white,
@@ -256,12 +300,47 @@ class _SimpleTimePickerState extends State<SimpleTimePicker> {
     );
   }
 
+  Widget _buildAmPmButton(String label, bool isSelected, VoidCallback onTap) {
+    final isPM = label == '下午';
+    final activeColor = isPM ? Colors.deepOrange : Colors.blue;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 10),
+        decoration: BoxDecoration(
+          color: isSelected ? activeColor : Colors.grey.shade300,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isSelected ? activeColor : Colors.grey.shade400,
+            width: 2,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: isSelected ? Colors.white : Colors.grey.shade600,
+          ),
+        ),
+      ),
+    );
+  }
+
   void _quickMinutes(int minutes) {
     final target = DateTime.now().add(Duration(minutes: minutes));
-    setState(() { _hour = target.hour; _minute = target.minute; });
+    setState(() {
+      _minute = target.minute;
+      _isPM = target.hour >= 12;
+      _hour = target.hour == 0 ? 12 : (target.hour > 12 ? target.hour - 12 : target.hour);
+    });
   }
 
   void _quickTime(int hour, int minute) {
-    setState(() { _hour = hour; _minute = minute; });
+    setState(() {
+      _minute = minute;
+      _isPM = hour >= 12;
+      _hour = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+    });
   }
 }

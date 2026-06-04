@@ -39,7 +39,7 @@ class ReminderForegroundService : Service() {
         private const val REMINDER_NOTIFICATION_ID_START = 20000
         private const val PREFS_NAME = "FlutterSharedPreferences"
         private const val FLUTTER_PREFIX = "flutter."
-        private const val CHECK_INTERVAL_MS = 60_000L
+        private const val CHECK_INTERVAL_MS = 10_000L
         private const val TRIGGER_WINDOW_MS = 2 * 60 * 60 * 1000L
         const val ACTION_STOP_ALARM = "com.niannianbuwang.app.STOP_ALARM"
         const val ACTION_ALARM_TRIGGER = "com.niannianbuwang.app.ALARM_TRIGGER"
