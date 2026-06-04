@@ -53,9 +53,9 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: |
           VERSION=$(grep 'version:' pubspec.yaml | head -1 | awk '{print $2}')
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Creating release v$VERSION"
-          # 直接上传APK到release（比action更可靠）
+          # 先删掉已有的空release，再创建新的
+          gh release delete "v$VERSION" --yes || true
           gh release create "v$VERSION" \
             "build/app/outputs/flutter-apk/app-release.apk" \
             --title "念念不忘 v$VERSION" \
