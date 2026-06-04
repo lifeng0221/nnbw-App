@@ -1128,11 +1128,8 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
   /// 判断提醒来源 — 比对当前用户ID
   String _getCreatorLabel(ReminderModel r) {
     final appState = context.read<AppState>();
+    // createdBy == 当前用户ID → 自己设的，否则是子女设的
     if (appState.userId != null && r.createdBy == appState.userId) {
-      return '我自己设的';
-    }
-    // 也检查测试数据
-    if (r.createdBy == 'parent_test' || r.createdBy == appState.userId) {
       return '我自己设的';
     }
     return '子女设的';

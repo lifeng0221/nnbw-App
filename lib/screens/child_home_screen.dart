@@ -810,7 +810,12 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
                 if (_reminders.isEmpty) _buildEmptyState()
                 else ..._reminders.map((r) => Padding(
                   padding: const EdgeInsets.only(bottom: 8),
-                  child: ReminderCard(reminder: r, isParent: false, onDelete: () => _deleteReminder(r)),
+                  child: ReminderCard(
+                    reminder: r,
+                    isParent: false,
+                    currentUserId: context.read<AppState>().userId,
+                    onDelete: () => _deleteReminder(r),
+                  ),
                 )),
                 const SizedBox(height: 80),
               ]),

@@ -5,6 +5,7 @@ import '../models/app_models.dart';
 class ReminderCard extends StatelessWidget {
   final ReminderModel reminder;
   final bool isParent;
+  final String? currentUserId; // 当前登录用户的ID，用于判断是谁创建的
   final VoidCallback? onConfirm;
   final VoidCallback? onSnooze;
   final VoidCallback? onPlayVoice;
@@ -14,6 +15,7 @@ class ReminderCard extends StatelessWidget {
     super.key,
     required this.reminder,
     required this.isParent,
+    this.currentUserId,
     this.onConfirm,
     this.onSnooze,
     this.onPlayVoice,
@@ -99,9 +101,10 @@ class ReminderCard extends StatelessWidget {
             Row(
               children: [
                 _buildTag(
-                  reminder.createdBy == (isParent ? 'self' : 'other')
-                      ? (isParent ? '我自己设的' : '子女设的')
-                      : (isParent ? '子女设的' : '我为爸妈设的'),
+                  // v1.0.58: 用 currentUserId 判断，区分自己创建 vs 他人创建
+                  reminder.createdBy == (currentUserId ?? '')
+                      ? (isParent ? '我自己设的' : '我为爸妈设的')
+                      : (isParent ? '子女设的' : '其他来源'),
                   Colors.blue[100]!,
                   Colors.blue,
                 ),
