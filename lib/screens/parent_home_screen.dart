@@ -1479,6 +1479,15 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
               }
             },
           ),
+          // v1.0.56: 管理绑定（查看/删除多余绑定）
+          ListTile(
+            leading: const Icon(Icons.manage_accounts, color: AppColors.primary),
+            title: const Text('管理绑定', style: TextStyle(fontSize: 18)),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const BindingManagementScreen()));
+            },
+          ),
           // v1.0.40: 守护服务状态
           ListTile(
             leading: Icon(_backgroundServiceRunning ? Icons.shield : Icons.shield_outlined, color: _backgroundServiceRunning ? Colors.blue : AppColors.textSecondary),

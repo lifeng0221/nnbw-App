@@ -160,6 +160,25 @@ class _BatteryGuideDialogState extends State<BatteryGuideDialog> {
                   ),
                 ),
               ],
+              // v1.0.56: 最后一步显示"去设置"按钮
+              if (_step == _steps.length - 1) ...[
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _isOpening ? null : _openBatterySettings,
+                    icon: _isOpening
+                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.settings, size: 18),
+                    label: Text(_isOpening ? '正在打开...' : '去设置', style: const TextStyle(fontSize: 14)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.purple.shade700,
+                      side: BorderSide(color: Colors.purple.shade300),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 20),
 
               // 按钮
@@ -213,58 +232,28 @@ class _BatteryGuideDialogState extends State<BatteryGuideDialog> {
   Future<void> _openBatterySettings() async {
     if (_isOpening) return;
     setState(() => _isOpening = true);
+    bool success = false;
 
     try {
-      // 尝试通过url_launcher打开设置页面（更可靠）
-      final List<String> uris = [
-        // 通用Android电池设置
-        'android.settings.BATTERY_SAVER_SETTINGS',
-        // 华为
-        'com.huawei.systemmanager/.apptech.activity.BatteryActivity',
-        // 小米
-        'com.miui.powerkeeper/.ui.HiddenAppsConfigActivity',
-        // OPPO/Realme
-        'com.coloros.safecenter/.permission.startup.StartupAppListActivity',
-        // Vivo
-        'com.vivo.permissionmanager/.activity.BgStartUpManagerActivity',
-        // 三星
-        'com.samsung.android.lool/.sdcardbooster.BatteryActivity',
-        // 通用应用设置
-        'android.settings.APPLICATION_DETAILS_SETTINGS',
-      ];
-
-      bool success = false;
-      for (final uri in uris) {
-        try {
-          final Uri intentUri;
-          if (uri.contains('android.settings.APPLICATION_DETAILS_SETTINGS')) {
-            intentUri = Uri.parse('android-app://com.niannianbuwang.app/settings/android.settings.APPLICATION_DETAILS_SETTINGS');
-          } else {
-            intentUri = Uri.parse('android-app://com.niannianbuwang.app/settings/$uri');
-          }
-
-          final canLaunch = await canLaunchUrl(intentUri);
-          if (canLaunch) {
-            await launchUrl(intentUri, mode: LaunchMode.externalApplication);
-            success = true;
-            print('🟢 电池设置跳转成功: $uri');
-            break;
-          }
-        } catch (_) {
-          continue;
-        }
-      }
-
-      // 如果url_launcher失败，尝试平台通道
-      if (!success && Platform.isAndroid) {
-        try {
-          const platform = MethodChannel('flutter/platform');
-          await platform.invokeMethod('openBatterySettings', {
-            'intent': 'android.settings.APPLICATION_DETAILS_SETTINGS',
-            'package': 'com.niannianbuwang.app',
-          });
+      // 直接打开应用详情页面（最可靠的方式）
+      if (Platform.isAndroid) {
+        // 尝试打开应用详情页面
+        final Uri uri = Uri.parse('package:com.niannianbuwang.app');
+        final canLaunch = await canLaunchUrl(uri);
+        
+        if (canLaunch) {
+          print('🟢 打开应用详情页: $uri');
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
           success = true;
-        } catch (_) {}
+        } else {
+          // 尝试打开设置页面
+          final Uri settingsUri = Uri.parse('android-settings:');
+          final canLaunchSettings = await canLaunchUrl(settingsUri);
+          if (canLaunchSettings) {
+            await launchUrl(settingsUri, mode: LaunchMode.externalApplication);
+            success = true;
+          }
+        }
       }
 
       if (!success) {

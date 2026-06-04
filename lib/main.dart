@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/parent_home_screen.dart';
 import 'screens/child_home_screen.dart';
 import 'screens/bind_screen.dart';
+import 'screens/binding_management_screen.dart';
 import 'screens/login_screen.dart';
 import 'services/api_service.dart';
 import 'services/alarm_service.dart';
