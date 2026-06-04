@@ -123,10 +123,31 @@ class ReminderCard extends StatelessWidget {
                   if (elapsed.inMinutes >= 30) ...[
                     const SizedBox(width: 6),
                     _buildTag('⚠️ 未确认', Colors.orange[100]!, Colors.orange[700]!),
+                    // v1.0.60: 超过60分钟未确认，建议直接提醒
+                    if (elapsed.inMinutes >= 60) ...[
+                      const SizedBox(width: 6),
+                      _buildTag('💡 直接去提醒一下吧', Colors.red[100]!, Colors.red[700]!),
+                    ],
                   ],
                 ],
               ],
             ),
+            // v1.0.60: 超时提醒的提示行
+            if (!isParent && reminder.status == 'triggered') ...[
+              DateTime now = DateTime.now();
+              Duration elapsed = now.difference(reminder.triggerTime);
+              if (elapsed.inMinutes >= 30) ...[
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    elapsed.inMinutes >= 60
+                        ? '💡 ${reminder.content} 已经${elapsed.inMinutes}分钟没确认了，建议直接打个电话提醒一下~'
+                        : '⚠️ ${reminder.content} 已经${elapsed.inMinutes}分钟没确认了，建议关注一下',
+                    style: TextStyle(fontSize: 13, color: elapsed.inMinutes >= 60 ? Colors.red[700] : Colors.orange[700]),
+                  ),
+                ),
+              ],
+            ],
             
             // 第四行：操作按钮（老人端已响铃的提醒）
             if (isParent && (reminder.status == 'triggered' || reminder.status == 'snoozed'))
