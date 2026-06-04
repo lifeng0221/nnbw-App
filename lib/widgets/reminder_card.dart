@@ -27,6 +27,12 @@ class ReminderCard extends StatelessWidget {
     final statusColor = _getStatusColor();
     final priorityIcon = _getPriorityIcon();
     
+    // v1.0.60: 计算超时时长
+    final now = DateTime.now();
+    final elapsed = now.difference(reminder.triggerTime);
+    final isOverdue30 = !isParent && reminder.status == 'triggered' && elapsed.inMinutes >= 30;
+    final isOverdue60 = isOverdue30 && elapsed.inMinutes >= 60;
+    
     return Card(
       elevation: 1,
       shape: RoundedRectangleBorder(
@@ -116,37 +122,27 @@ class ReminderCard extends StatelessWidget {
                 if (!isParent && reminder.status == 'confirmed') ...[
                   const SizedBox(width: 6),
                   _buildTag('✅ 老人已确认', Colors.green[100]!, Colors.green[700]!),
-                ] else if (!isParent && reminder.status == 'triggered') ...[
-                  // v1.0.60: 触发超过30分钟未确认，显示超时警告
-                  DateTime now = DateTime.now();
-                  Duration elapsed = now.difference(reminder.triggerTime);
-                  if (elapsed.inMinutes >= 30) ...[
+                ] else if (isOverdue30) ...[
+                  const SizedBox(width: 6),
+                  _buildTag('⚠️ 未确认', Colors.orange[100]!, Colors.orange[700]!),
+                  if (isOverdue60) ...[
                     const SizedBox(width: 6),
-                    _buildTag('⚠️ 未确认', Colors.orange[100]!, Colors.orange[700]!),
-                    // v1.0.60: 超过60分钟未确认，建议直接提醒
-                    if (elapsed.inMinutes >= 60) ...[
-                      const SizedBox(width: 6),
-                      _buildTag('💡 直接去提醒一下吧', Colors.red[100]!, Colors.red[700]!),
-                    ],
+                    _buildTag('💡 直接去提醒一下吧', Colors.red[100]!, Colors.red[700]!),
                   ],
                 ],
               ],
             ),
             // v1.0.60: 超时提醒的提示行
-            if (!isParent && reminder.status == 'triggered') ...[
-              DateTime now = DateTime.now();
-              Duration elapsed = now.difference(reminder.triggerTime);
-              if (elapsed.inMinutes >= 30) ...[
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    elapsed.inMinutes >= 60
-                        ? '💡 ${reminder.content} 已经${elapsed.inMinutes}分钟没确认了，建议直接打个电话提醒一下~'
-                        : '⚠️ ${reminder.content} 已经${elapsed.inMinutes}分钟没确认了，建议关注一下',
-                    style: TextStyle(fontSize: 13, color: elapsed.inMinutes >= 60 ? Colors.red[700] : Colors.orange[700]),
-                  ),
+            if (isOverdue30) ...[
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  isOverdue60
+                      ? '💡 ${reminder.content} 已经${elapsed.inMinutes}分钟没确认了，建议直接打个电话提醒一下~'
+                      : '⚠️ ${reminder.content} 已经${elapsed.inMinutes}分钟没确认了，建议关注一下',
+                  style: TextStyle(fontSize: 13, color: isOverdue60 ? Colors.red[700] : Colors.orange[700]),
                 ),
-              ],
+              ),
             ],
             
             // 第四行：操作按钮（老人端已响铃的提醒）
