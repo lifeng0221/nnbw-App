@@ -51,6 +51,8 @@ class ReminderForegroundService : Service() {
         private var alarmMediaPlayer: MediaPlayer? = null
         private var wakeLock: PowerManager.WakeLock? = null
         private var screenWakeLock: PowerManager.WakeLock? = null
+        // 改为 companion object 变量，进程被杀死后重启时保持状态
+        private var isRunning = false
 
         fun start(context: Context) {
             val intent = Intent(context, ReminderForegroundService::class.java)
@@ -102,7 +104,6 @@ class ReminderForegroundService : Service() {
     }
 
     private val handler = Handler(Looper.getMainLooper())
-    private var isRunning = false
     private val alarmManager by lazy { getSystemService(Context.ALARM_SERVICE) as AlarmManager }
 
     private val checkRunnable = object : Runnable {
@@ -121,6 +122,14 @@ class ReminderForegroundService : Service() {
         super.onCreate()
         android.util.Log.d(TAG, "服务onCreate")
         createNotificationChannels()
+        // 进程重启时，重新调度所有闹钟并检查遗漏提醒
+        scheduleAllFutureAlarms()
+        if (!isRunning) {
+            startForeground(NOTIFICATION_ID, createForegroundNotification())
+            isRunning = true
+            try { checkReminders() } catch (e: Exception) { }
+            handler.post(checkRunnable)
+        }
         
         val filter = IntentFilter(ACTION_STOP_ALARM)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -189,6 +198,8 @@ class ReminderForegroundService : Service() {
 
         startForeground(NOTIFICATION_ID, createForegroundNotification())
         isRunning = true
+        // 服务启动后立即检查一次遗漏的提醒（进程被杀后重启时特别重要）
+        try { checkReminders() } catch (e: Exception) { }
         handler.post(checkRunnable)
 
         android.util.Log.d(TAG, "前台服务已启动，开始轮询提醒")
