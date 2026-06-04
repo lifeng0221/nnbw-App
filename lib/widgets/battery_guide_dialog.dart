@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../services/local_storage_service.dart';
 
 /// v1.0.56: 首次启动引导弹窗——解决"后台耗电权限"用户找不到的问题
@@ -229,55 +229,22 @@ class _BatteryGuideDialogState extends State<BatteryGuideDialog> {
   }
 
   // v1.0.56: 一键跳转电池设置页面
+  // v1.0.59: 改用 openAppSettings() 直接打开本APP的设置页面（最可靠）
   Future<void> _openBatterySettings() async {
     if (_isOpening) return;
     setState(() => _isOpening = true);
     bool success = false;
 
     try {
-      // 直接打开应用详情页面（最可靠的方式）
-      if (Platform.isAndroid) {
-        // 尝试打开应用详情页面
-        final Uri uri = Uri.parse('package:com.niannianbuwang.app');
-        final canLaunch = await canLaunchUrl(uri);
-        
-        if (canLaunch) {
-          print('🟢 打开应用详情页: $uri');
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
-          success = true;
-        } else {
-          // 尝试打开设置页面
-          final Uri settingsUri = Uri.parse('android-settings:');
-          final canLaunchSettings = await canLaunchUrl(settingsUri);
-          if (canLaunchSettings) {
-            await launchUrl(settingsUri, mode: LaunchMode.externalApplication);
-            success = true;
-          }
-        }
-      }
-
-      if (!success) {
-        _showManualGuide();
-      }
+      // 直接打开本APP的设置页面（用户可以在这里找到电池优化选项）
+      await openAppSettings();
+      success = true;
     } catch (e) {
       print('🔴 电池设置跳转失败: $e');
-      _showManualGuide();
     } finally {
       if (mounted) {
         setState(() => _isOpening = false);
       }
-    }
-  }
-
-  void _showManualGuide() {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('请按上方步骤手动设置：设置→电池→后台耗电→允许'),
-          backgroundColor: Colors.orange,
-          duration: Duration(seconds: 4),
-        ),
-      );
     }
   }
 }

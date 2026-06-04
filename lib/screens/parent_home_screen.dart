@@ -330,6 +330,11 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
       print('🟢 长辈端: 绑定查询结果: success=${bindResp['success']}, data=${bindResp['data']}');
       if (bindResp['success'] == true && bindResp['data'] is List) {
         final bindings = bindResp['data'] as List;
+        
+        // v1.0.59: 先读取现有绑定用于去重，避免重复存储导致绑定列表膨胀
+        final existingBindings = await _storage.getBindings(appState.userId!);
+        final existingIds = existingBindings.map((b) => b.bindingId).toSet();
+        
         // 🔧 v1.0.31: 只取 active 且 child_id 非null的绑定作为 serverBindingId
         int? bestBindingId;
         for (final j in bindings) {
@@ -340,7 +345,11 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
             status: j['status'] ?? 'pending',
             createdAt: j['created_at'] != null ? DateTime.parse(j['created_at']) : DateTime.now(),
           );
-          await _storage.saveBinding(binding);
+          // v1.0.59: 只存不重复的绑定
+          if (!existingIds.contains(binding.bindingId)) {
+            await _storage.saveBinding(binding);
+            existingIds.add(binding.bindingId); // 防止同一批里重复
+          }
           // 只取 active 且 child_id 不为空的绑定
           if (binding.status == 'active' && binding.childId.isNotEmpty) {
             final bid = j['binding_id'];

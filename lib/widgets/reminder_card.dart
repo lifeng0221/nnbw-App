@@ -101,10 +101,12 @@ class ReminderCard extends StatelessWidget {
             Row(
               children: [
                 _buildTag(
-                  // v1.0.58: 用 currentUserId 判断，区分自己创建 vs 他人创建
+                  // v1.0.58: 用 currentUserId 判断
+                  // 子女端：我为爸妈设的（自己创建）vs 父母自设（父母创建）
+                  // 老人端：我自己设的（自己创建）vs 子女设的（子女创建）
                   reminder.createdBy == (currentUserId ?? '')
                       ? (isParent ? '我自己设的' : '我为爸妈设的')
-                      : (isParent ? '子女设的' : '其他来源'),
+                      : (isParent ? '子女设的' : '父母自设'),
                   Colors.blue[100]!,
                   Colors.blue,
                 ),

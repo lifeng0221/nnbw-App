@@ -379,9 +379,11 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
       final bindResp = await _apiService.getBindings(childId: appState.userId!);
       print('🟢 子女端: 绑定查询结果: success=${bindResp['success']}, data=${bindResp['data']}');
       if (bindResp['success'] == true && bindResp['data'] is List) {
+        // v1.0.59: 先读取现有绑定用于去重，避免重复存储导致绑定列表膨胀
+        final existingBindings = await _storage.getBindings(appState.userId!);
+        final existingIds = existingBindings.map((b) => b.bindingId).toSet();
+        
         // 🔧 v1.0.31: 只取 active 且 child_id 非null的绑定作为 serverBindingId
-        // 之前的bug：遍历所有绑定，_serverBindingId 被最后一个覆盖，
-        // 可能被 pending 状态的绑定（child_id=null）覆盖，导致创建提醒发到错误的绑定
         int? bestBindingId;
         for (final j in bindResp['data'] as List) {
           final binding = BindingModel(
@@ -391,7 +393,11 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
             status: j['status'] ?? 'pending',
             createdAt: j['created_at'] != null ? DateTime.parse(j['created_at']) : DateTime.now(),
           );
-          await _storage.saveBinding(binding);
+          // v1.0.59: 只存不重复的绑定
+          if (!existingIds.contains(binding.bindingId)) {
+            await _storage.saveBinding(binding);
+            existingIds.add(binding.bindingId);
+          }
           // 只取 active 且 child_id 不为空的绑定
           if (binding.status == 'active' && binding.childId.isNotEmpty) {
             final bid = j['binding_id'];
