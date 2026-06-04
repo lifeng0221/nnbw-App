@@ -9,6 +9,7 @@ import '../services/api_service.dart';
 import '../services/local_storage_service.dart';
 import '../services/alarm_service.dart';
 import '../services/background_reminder_service.dart'; // v1.0.48: 子女端也启动前台服务
+import '../widgets/battery_guide_dialog.dart';
 import '../widgets/reminder_card.dart';
 import '../widgets/simple_time_picker.dart';
 import 'bind_screen.dart';
@@ -260,7 +261,22 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
   void initState() {
     super.initState();
     // 🔧 v1.0.27: 先初始化服务，完成后再启动定时器
-    _initServices();
+    _initServices().then((_) {
+      if (mounted) _checkBatteryGuide();
+    });
+  }
+
+  /// v1.0.54: 首次启动显示后台耗电视导
+  Future<void> _checkBatteryGuide() async {
+    if (await shouldShowBatteryGuide()) {
+      if (mounted) {
+        await showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => const BatteryGuideDialog(),
+        );
+      }
+    }
   }
 
   Future<void> _initServices() async {

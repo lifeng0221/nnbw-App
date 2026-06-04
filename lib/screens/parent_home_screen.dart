@@ -13,6 +13,7 @@ import '../services/local_storage_service.dart';
 import '../services/voice_service.dart';
 import '../services/alarm_service.dart';
 import '../services/background_reminder_service.dart';
+import '../widgets/battery_guide_dialog.dart';
 import '../widgets/simple_time_picker.dart';
 import 'bind_screen.dart';
 import 'login_screen.dart';
@@ -79,7 +80,22 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     _initAnimations();
     // 🔧 v1.0.27: 先初始化服务，完成后再启动定时器
     // 之前的bug：initServices是异步但initState不等它，refreshTimer可能先触发
-    _initServices();
+    _initServices().then((_) {
+      if (mounted) _checkBatteryGuide();
+    });
+  }
+
+  /// v1.0.54: 首次启动显示后台耗电视导
+  Future<void> _checkBatteryGuide() async {
+    if (await shouldShowBatteryGuide()) {
+      if (mounted) {
+        await showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => const BatteryGuideDialog(),
+        );
+      }
+    }
   }
 
   void _initAnimations() {
