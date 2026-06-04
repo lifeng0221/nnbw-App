@@ -20,14 +20,13 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 /**
- * 原生前台服务 — 念念不忘提醒守护 v1.0.52
+ * 原生前台服务 — 念念不忘提醒守护 v1.0.61
  *
- * v1.0.52 息屏通知修复（针对vivo等国产ROM）：
- * - 移除fullScreenIntent（vivo系统静默拦截，不生效）
- * - 改用heads-up通知（屏幕亮时自动弹出）+ 锁屏公开版本
- * - 通知展开时有"停止"按钮，息屏时点击通知→跳AlarmActivity
- * - stopAlarmReceiver停止后自动取消通知
- * - 保留setAlarmClock()闹钟调度（闹钟图标可见，用户可从状态栏点开）
+ * v1.0.61 分阶段响铃修复：
+ * - 铃声不再无限循环，改为响30秒后停止
+ * - 触发后自动调度后续提醒：+5分钟、+15分钟、+30分钟、+60分钟、+120分钟
+ * - 用户确认后自动取消所有后续闹钟
+ * - 保留setAlarmClock()闹钟调度（闹钟图标可见）
  */
 class ReminderForegroundService : Service() {
 
@@ -46,6 +45,17 @@ class ReminderForegroundService : Service() {
         private const val ACTION_SCHEDULE_ALL = "com.niannianbuwang.app.SCHEDULE_ALL"
         private const val EXTRA_REMINDER_ID = "reminder_id"
         private const val EXTRA_REMINDER_CONTENT = "reminder_content"
+        private const val EXTRA_FOLLOWUP_NUM = "followup_num"
+
+        // v1.0.61 分阶段响铃配置：响铃延迟（毫秒）
+        // 铃声响30秒后停止，后续提醒按以下间隔调度
+        private val FOLLOWUP_DELAYS = longArrayOf(
+            5 * 60 * 1000L,   // 第1次追响: 5分钟后
+            15 * 60 * 1000L,  // 第2次追响: 15分钟后（累计20分钟）
+            30 * 60 * 1000L,  // 第3次追响: 30分钟后（累计50分钟）
+            60 * 60 * 1000L,   // 第4次追响: 60分钟后（累计110分钟）
+            120 * 60 * 1000L   // 第5次追响: 120分钟后（累计230分钟）
+        )
 
         private val triggeredIds = mutableSetOf<String>()
         private var alarmMediaPlayer: MediaPlayer? = null
@@ -153,23 +163,28 @@ class ReminderForegroundService : Service() {
                 isRunning = true
                 handler.post(checkRunnable)
             }
+            // v1.0.61: Flutter触发的也调度追响
+            scheduleFollowupAlarm(reminderId, content, 0)
             return START_STICKY
         }
 
         if (intent?.action == ACTION_ALARM_TRIGGER) {
             val reminderId = intent.getStringExtra(EXTRA_REMINDER_ID) ?: ""
             val content = intent.getStringExtra(EXTRA_REMINDER_CONTENT) ?: "提醒"
+            val followupNum = intent.getIntExtra(EXTRA_FOLLOWUP_NUM, 0)
+            
             if (!isRunning) {
                 startForeground(NOTIFICATION_ID, createForegroundNotification())
                 isRunning = true
                 handler.post(checkRunnable)
             }
             if (!triggeredIds.contains(reminderId)) {
-                android.util.Log.d(TAG, "AlarmReceiver触发提醒: $content")
+                android.util.Log.d(TAG, "追响闹钟触发[$followupNum]: $content")
                 showReminderNotification(reminderId, content, "normal")
                 playAlarmSound()
-                markReminderTriggered(reminderId)
                 triggeredIds.add(reminderId)
+                // v1.0.61: 调度下一轮追响
+                scheduleFollowupAlarm(reminderId, content, followupNum)
             }
             return START_STICKY
         }
@@ -224,6 +239,11 @@ class ReminderForegroundService : Service() {
             if (intent?.action == ACTION_STOP_ALARM) {
                 android.util.Log.d(TAG, "收到停止铃声广播")
                 stopAlarmSound()
+                // v1.0.61: 取消该提醒的所有追响闹钟
+                val reminderId = intent.getStringExtra(EXTRA_REMINDER_ID)
+                if (reminderId != null) {
+                    cancelFollowupAlarms(reminderId)
+                }
                 // 取消所有提醒通知
                 try {
                     val nm = context?.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
@@ -324,6 +344,8 @@ class ReminderForegroundService : Service() {
                             obj.put("status", "triggered")
                             triggeredIds.add(reminderId)
                             prefs.edit().putString(key, jsonArray.toString()).apply()
+                            // v1.0.61: 立即触发后调度追响闹钟
+                            scheduleFollowupAlarm(reminderId, content, 0)
                         }
                     } catch (e: Exception) {
                         android.util.Log.e(TAG, "调度闹钟时间解析错误", e)
@@ -361,11 +383,11 @@ class ReminderForegroundService : Service() {
                         .build()
                 )
                 setDataSource(this@ReminderForegroundService, alarmUri)
-                isLooping = true
+                isLooping = false  // v1.0.61: 不再无限循环，铃声约30秒后自动停止
                 setOnPreparedListener { it.start() }
                 prepareAsync()
             }
-            android.util.Log.d(TAG, "MediaPlayer闹钟铃声播放中(USAGE_ALARM)")
+            android.util.Log.d(TAG, "MediaPlayer闹钟铃声播放中(USAGE_ALARM)，30秒后自动停止")
             return
         } catch (e: Exception) {
             android.util.Log.e(TAG, "MediaPlayer播放失败", e)
@@ -452,6 +474,8 @@ class ReminderForegroundService : Service() {
                                 triggeredIds.add(reminderId)
                                 triggeredCount++
                                 cancelAlarmForReminder(reminderId)
+                                // v1.0.61: 触发后调度第一轮追响闹钟
+                                scheduleFollowupAlarm(reminderId, content, 0)
 
                                 android.util.Log.d(TAG, "触发提醒(Handler轮询): $content (原status=$status)")
                             } else {
@@ -554,6 +578,7 @@ class ReminderForegroundService : Service() {
     }
 
     private fun cancelAlarmForReminder(reminderId: String) {
+        // 取消主闹钟
         try {
             val intent = Intent(this, AlarmReceiver::class.java)
             val pendingIntent = PendingIntent.getBroadcast(
@@ -562,10 +587,71 @@ class ReminderForegroundService : Service() {
                 intent,
                 PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
             )
-            pendingIntent?.let {
-                alarmManager.cancel(it)
-            }
+            pendingIntent?.let { alarmManager.cancel(it) }
         } catch (e: Exception) { }
+        // v1.0.61: 同时取消所有追响闹钟
+        cancelFollowupAlarms(reminderId)
+    }
+
+    // v1.0.61: 取消指定提醒的所有追响闹钟
+    private fun cancelFollowupAlarms(reminderId: String) {
+        for (i in FOLLOWUP_DELAYS.indices) {
+            try {
+                val intent = Intent(this, AlarmReceiver::class.java)
+                // 追响闹钟用 reminderId.hashCode() + 20000 + i 作为 requestCode，与主闹钟(直接用hashCode)区分
+                val pendingIntent = PendingIntent.getBroadcast(
+                    this,
+                    (reminderId.hashCode() and 0x7FFFFFFF) + 20000 + i,
+                    intent,
+                    PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+                )
+                pendingIntent?.let { alarmManager.cancel(it) }
+            } catch (e: Exception) { }
+        }
+        android.util.Log.d(TAG, "已取消提醒的所有追响闹钟: $reminderId")
+    }
+
+    // v1.0.61: 调度第N轮追响闹钟
+    // followupIndex=0 表示第一轮追响（在首次触发后5分钟响）
+    private fun scheduleFollowupAlarm(reminderId: String, content: String, followupIndex: Int) {
+        if (followupIndex >= FOLLOWUP_DELAYS.size) {
+            android.util.Log.d(TAG, "追响次数已用完，不再调度: $reminderId (共${FOLLOWUP_DELAYS.size}轮)")
+            return
+        }
+        val delay = FOLLOWUP_DELAYS[followupIndex]
+        val triggerTime = System.currentTimeMillis() + delay
+        val requestCode = (reminderId.hashCode() and 0x7FFFFFFF) + 20000 + followupIndex
+
+        try {
+            val intent = Intent(this, AlarmReceiver::class.java).apply {
+                putExtra(EXTRA_REMINDER_ID, reminderId)
+                putExtra(EXTRA_REMINDER_CONTENT, content)
+                putExtra(EXTRA_FOLLOWUP_NUM, followupIndex + 1)
+            }
+            val pendingIntent = PendingIntent.getBroadcast(
+                this,
+                requestCode,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerTime,
+                    pendingIntent
+                )
+            } else {
+                alarmManager.setExact(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerTime,
+                    pendingIntent
+                )
+            }
+            android.util.Log.d(TAG, "追响闹钟已调度[$followupIndex]: $content @ ${Date(triggerTime)} (${delay / 60000}分钟后)")
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "追响闹钟调度失败[$followupIndex]: $e")
+        }
     }
 
     private fun markReminderTriggered(reminderId: String) {
@@ -607,8 +693,10 @@ class ReminderForegroundService : Service() {
         val isUrgent = priority == "urgent"
         val title = if (isUrgent) "🚨 紧急提醒" else "⏰ 念念不忘提醒"
 
-        // 停止铃声的Intent
-        val stopIntent = Intent(ACTION_STOP_ALARM)
+        // 停止铃声的Intent（带上reminderId，v1.0.61用于取消追响闹钟）
+        val stopIntent = Intent(ACTION_STOP_ALARM).apply {
+            putExtra(EXTRA_REMINDER_ID, reminderId)
+        }
         val stopPendingIntent = PendingIntent.getBroadcast(
             this, 2, stopIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
