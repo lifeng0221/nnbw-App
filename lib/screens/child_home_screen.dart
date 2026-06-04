@@ -99,17 +99,21 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
       }
     }
     
-    normalized = normalized.replaceAllMapped(
-      RegExp(r'([零一二两三四五六七八九十百]+)\s*点'),
-      (m) { final num = _chineseNumToInt(m.group(1)!); return num >= 0 ? '$num点' : m.group(0)!; },
-    );
+    // ★★★ 调整顺序：先匹配 X点半 和 X点XX分，再匹配单独的 X点 ★★★
+    // 1. "X点半"
     normalized = normalized.replaceAllMapped(
       RegExp(r'([零一二两三四五六七八九十百]+)\s*点半'),
       (m) { final num = _chineseNumToInt(m.group(1)!); return num >= 0 ? '$num点半' : m.group(0)!; },
     );
+    // 2. "X点XX分" / "X点XX" ← 要在单独的 X点 之前执行
     normalized = normalized.replaceAllMapped(
       RegExp(r'([零一二两三四五六七八九十百]+)\s*点\s*([零一二两三四五六七八九十百]+)\s*分?'),
       (m) { final h = _chineseNumToInt(m.group(1)!); final min = _chineseNumToInt(m.group(2)!); return (h >= 0 && min >= 0) ? '$h点$min分' : m.group(0)!; },
+    );
+    // 3. 单独的 "X点"（负向前瞻：点后面不是中文数字才匹配）
+    normalized = normalized.replaceAllMapped(
+      RegExp(r'([零一二两三四五六七八九十百]+)\s*点(?!\s*[零一二两三四五六七八九十百])'),
+      (m) { final num = _chineseNumToInt(m.group(1)!); return num >= 0 ? '$num点' : m.group(0)!; },
     );
     normalized = normalized.replaceAllMapped(
       RegExp(r'([零一二两三四五六七八九十百]+)\s*分钟\s*后'),
