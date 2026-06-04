@@ -1,8 +1,9 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/local_storage_service.dart';
 
-/// v1.0.54: 首次启动引导弹窗——解决"后台耗电权限"用户找不到的问题
+/// v1.0.55: 首次启动引导弹窗——解决"后台耗电权限"用户找不到的问题
 /// 仅在首次打开App时弹出，一步一步引导用户完成关键设置
 class BatteryGuideDialog extends StatefulWidget {
   const BatteryGuideDialog({super.key});
@@ -137,6 +138,23 @@ class _BatteryGuideDialogState extends State<BatteryGuideDialog> {
                 ],
               ),
             ),
+            // v1.0.55: 一键跳转按钮（针对各品牌电池设置页面）
+            if (_step == 0) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _openBatterySettings,
+                  icon: const Icon(Icons.open_in_new, size: 18),
+                  label: const Text('一键跳转设置', style: TextStyle(fontSize: 14)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.orange.shade700,
+                    side: BorderSide(color: Colors.orange.shade300),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 24),
 
             // 按钮
@@ -183,6 +201,64 @@ class _BatteryGuideDialogState extends State<BatteryGuideDialog> {
   Future<void> _markShown() async {
     final storage = LocalStorageService();
     await storage.setString('battery_guide_shown', 'true');
+  }
+
+  // v1.0.55: 一键跳转电池设置页面
+  Future<void> _openBatterySettings() async {
+    try {
+      // 尝试多种品牌电池设置页面
+      const List<String> intents = [
+        // 通用Android电池设置
+        'android.settings.BATTERY_SAVER_SETTINGS',
+        // 华为/荣耀
+        'com.huawei.systemmanager/.apptech.activity.BatteryActivity',
+        // 小米
+        'com.miui.powerkeeper/.ui.HiddenAppsConfigActivity',
+        // OPPO/Vivo/Realme
+        'com.coloros.safecenter/.permission.startup.StartupAppListActivity',
+        // Vivo
+        'com.vivo.permissionmanager/.activity.BgStartUpManagerActivity',
+        // 三星
+        'com.samsung.android.lool/.sdcardbooster.BatteryActivity',
+        // 通用设置
+        'android.settings.APPLICATION_SETTINGS',
+      ];
+
+      for (final intent in intents) {
+        try {
+          const platform = MethodChannel('flutter/platform');
+          // 尝试通过平台通道打开设置
+          await platform.invokeMethod('openBatterySettings', {'intent': intent});
+          print('🟢 电池设置跳转成功: $intent');
+          return;
+        } catch (_) {
+          // 继续尝试下一个
+        }
+      }
+
+      // 如果所有Intent都失败，尝试用package方式
+      if (Platform.isAndroid) {
+        const platform = MethodChannel('flutter/platform');
+        await platform.invokeMethod('openBatterySettings', {
+          'package': 'com.niannianbuwang.app',
+        });
+      }
+    } catch (e) {
+      print('🔴 电池设置跳转失败: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('无法自动跳转，请手动按步骤设置'),
+            backgroundColor: Colors.orange,
+            action: SnackBarAction(
+              label: '知道了',
+              textColor: Colors.white,
+              onPressed: () {},
+            ),
+          ),
+        );
+      }
+    }
   }
 }
 

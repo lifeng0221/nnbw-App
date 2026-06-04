@@ -72,6 +72,41 @@ class MainActivity : FlutterActivity() {
                             result.error("SCHEDULE_FAILED", e.message, null)
                         }
                     }
+                    // v1.0.55: 打开电池设置页面
+                    "openBatterySettings" -> {
+                        try {
+                            val intentString = call.argument<String>("intent")
+                            if (intentString != null) {
+                                val intent = Intent().apply {
+                                    setClassName("com.android.settings", intentString)
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                try {
+                                    startActivity(intent)
+                                    result.success(true)
+                                } catch (e: Exception) {
+                                    // Intent失败，尝试package方式
+                                    val packageName = call.argument<String>("package")
+                                    if (packageName != null) {
+                                        val pkgIntent = Intent().apply {
+                                            action = android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+                                            data = android.net.Uri.parse("package:$packageName")
+                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                        startActivity(pkgIntent)
+                                        result.success(true)
+                                    } else {
+                                        result.error("OPEN_FAILED", "无法打开电池设置", null)
+                                    }
+                                }
+                            } else {
+                                result.error("INVALID_ARGUMENT", "缺少intent参数", null)
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e("MainActivity", "打开电池设置失败", e)
+                            result.error("OPEN_FAILED", e.message, null)
+                        }
+                    }
                     else -> result.notImplemented()
                 }
             }

@@ -776,7 +776,8 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
             onPressed: () async {
               final result = await Navigator.push(context, MaterialPageRoute(builder: (_) => const BindScreen()));
               // 🔧 v1.0.27: 绑定页面返回后，立即重新同步
-              if (result == true) {
+              // v1.0.55: 添加mounted检查，避免Widget已dispose后仍调用setState导致黑屏
+              if (result == true && mounted) {
                 print('🟢 子女端: 绑定成功返回，重新同步');
                 await _syncFromServer();
               }
