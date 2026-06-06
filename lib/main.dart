@@ -8,11 +8,39 @@ import 'screens/binding_management_screen.dart';
 import 'screens/login_screen.dart';
 import 'services/api_service.dart';
 import 'services/alarm_service.dart';
+import 'services/background_reminder_service.dart';
+import 'services/local_storage_service.dart';
 
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
+  // v1.0.62: 注入 AlarmActivity "知道了"按钮 → Flutter 的业务回调
+  // 业务：把 status 改为 confirmed + 同步后端 + 触发 UI 刷新
+  BackgroundReminderService.onConfirmReminder = (String reminderId) async {
+    print('🟢 [main] 收到 AlarmActivity confirmReminder: $reminderId');
+    final storage = LocalStorageService();
+    final api = ApiService();
+
+    // 1) 本地 status → confirmed
+    final ok = await storage.confirmReminder(reminderId);
+    print('🟢 [main] 本地 status 改为 confirmed: $ok');
+
+    // 2) 同步后端（reminderId 是字符串ID，serverId 是数字ID，两者通常一致）
+    final serverId = int.tryParse(reminderId);
+    if (serverId != null) {
+      try {
+        await api.updateReminderStatus(serverId, 'confirmed');
+        print('🟢 [main] 后端状态已同步为 confirmed: $serverId');
+      } catch (e) {
+        print('🔴 [main] 后端同步失败（不阻塞流程）: $e');
+      }
+    }
+
+    // 3) 触发 AlarmService 刷新回调，老人端/子女端首页会重新加载提醒列表
+    AlarmService().triggerRemindersChanged();
+  };
+
   runApp(
     MultiProvider(
       providers: [

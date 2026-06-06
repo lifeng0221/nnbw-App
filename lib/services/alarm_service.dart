@@ -394,4 +394,12 @@ class AlarmService {
     _checkTimer?.cancel();
     _audioPlayer.dispose();
   }
+
+  /// v1.0.62: 主动触发提醒列表变化回调
+  /// 用于 AlarmActivity 全屏弹窗"知道了"按钮通过 MethodChannel 通知Flutter时
+  /// 让老人端首页 + 子女端首页立刻刷新数据
+  void triggerRemindersChanged() {
+    print('🟢 AlarmService.triggerRemindersChanged 被调用');
+    onRemindersChanged?.call();
+  }
 }

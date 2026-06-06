@@ -17,12 +17,41 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 class BackgroundReminderService {
   static final BackgroundReminderService _instance = BackgroundReminderService._();
   factory BackgroundReminderService() => _instance;
-  BackgroundReminderService._();
+  BackgroundReminderService._() {
+    // v1.0.62: 注册 MethodCallHandler 接收 Kotlin→Flutter 的反向调用
+    _channel.setMethodCallHandler(_handleMethodCall);
+  }
 
   static const MethodChannel _channel = MethodChannel('com.niannianbuwang.app/reminder_service');
 
   bool _isRunning = false;
   bool get isRunning => _isRunning;
+
+  /// v1.0.62: AlarmActivity "知道了"按钮触发时的回调
+  /// 业务逻辑在 main.dart 注入（执行 status→confirmed + 同步后端 + UI刷新）
+  static Future<void> Function(String reminderId)? onConfirmReminder;
+
+  /// v1.0.62: 处理 Kotlin→Flutter 的 MethodChannel 调用
+  static Future<dynamic> _handleMethodCall(MethodCall call) async {
+    print('[Service] 收到Kotlin调用: ${call.method} ${call.arguments}');
+    switch (call.method) {
+      case 'confirmReminder':
+        final reminderId = call.arguments as String?;
+        if (reminderId != null && reminderId.isNotEmpty && onConfirmReminder != null) {
+          try {
+            await onConfirmReminder!(reminderId);
+            print('[Service] confirmReminder 处理完成: $reminderId');
+          } catch (e) {
+            print('[Service] confirmReminder 处理异常: $e');
+          }
+        } else {
+          print('[Service] confirmReminder 跳过: reminderId=$reminderId callback=${onConfirmReminder != null}');
+        }
+        return true;
+      default:
+        return null;
+    }
+  }
 
   /// 启动原生前台服务
   Future<bool> startService() async {

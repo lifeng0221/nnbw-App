@@ -118,10 +118,16 @@ class ReminderCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 6),
                 _buildTag(reminder.category, Colors.grey[100]!, Colors.grey),
-                // v1.0.60: 子女端显示老人已响应（已触发=已响铃=老人已看到）
-                if (!isParent && (reminder.status == 'confirmed' || reminder.status == 'triggered')) ...[
+                // v1.0.62: 子女端状态标签逻辑改严
+                // - 'confirmed' (老人真的点了"知道了") → 绿色"老人已确认"
+                // - 'triggered' (已响铃但老人没点确认)  → 黄色"已响铃 · 待老人确认"
+                // 原 v1.0.61 把 triggered 算进"已确认"是误判，已回退
+                if (!isParent && reminder.status == 'confirmed') ...[
                   const SizedBox(width: 6),
                   _buildTag('✅ 老人已确认', Colors.green[100]!, Colors.green[700]!),
+                ] else if (!isParent && reminder.status == 'triggered') ...[
+                  const SizedBox(width: 6),
+                  _buildTag('🔔 已响铃 · 待老人确认', Colors.amber[100]!, Colors.amber[800]!),
                 ] else if (isOverdue30) ...[
                   const SizedBox(width: 6),
                   _buildTag('⚠️ 未确认', Colors.orange[100]!, Colors.orange[700]!),

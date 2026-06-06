@@ -10,13 +10,18 @@ class MainActivity : FlutterActivity() {
 
     companion object {
         private const val CHANNEL = "com.niannianbuwang.app/reminder_service"
+        // v1.0.62: 暴露 MethodChannel 静态引用，供 AlarmActivity 调用
+        // 实现 Kotlin→Flutter 的反向通知（AlarmActivity "知道了"按钮通知 Flutter 走 _confirmReminder 流程）
+        @Volatile
+        var methodChannel: MethodChannel? = null
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
-            .setMethodCallHandler { call, result ->
+        val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
+        methodChannel = channel
+        channel.setMethodCallHandler { call, result ->
                 when (call.method) {
                     "startService" -> {
                         try {

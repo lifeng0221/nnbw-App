@@ -132,14 +132,37 @@ class AlarmActivity : Activity() {
     }
 
     private fun dismissAlarm() {
+        // 1) 先停铃声
         ReminderForegroundService.stopAlarmSound()
-        // 取消闹钟通知
+
+        val reminderId = intent.getStringExtra(EXTRA_REMINDER_ID) ?: ""
+
+        // 2) 取消闹钟通知
         try {
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-            val reminderId = intent.getStringExtra(EXTRA_REMINDER_ID) ?: ""
             val notificationId = 20000 + (reminderId.hashCode() and 0xFFF)
             manager.cancel(notificationId)
         } catch (e: Exception) { }
+
+        // 3) v1.0.62: 切断该提醒的所有追响闹钟（5/15/30/60/120分钟那一串）
+        if (reminderId.isNotEmpty()) {
+            try {
+                ReminderForegroundService.cancelFollowupAlarms(this, reminderId)
+                android.util.Log.d("AlarmActivity", "已切断reminder=$reminderId 的所有追响闹钟")
+            } catch (e: Exception) {
+                android.util.Log.e("AlarmActivity", "取消追响闹钟失败", e)
+            }
+
+            // 4) v1.0.62: 通过 MethodChannel 通知 Flutter 端走 _confirmReminder 流程
+            //    (status→confirmed + 同步后端 + UI刷新)
+            try {
+                MainActivity.methodChannel?.invokeMethod("confirmReminder", reminderId)
+                android.util.Log.d("AlarmActivity", "已通知Flutter端确认: $reminderId")
+            } catch (e: Exception) {
+                android.util.Log.e("AlarmActivity", "通知Flutter确认失败", e)
+            }
+        }
+
         finish()
     }
 

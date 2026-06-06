@@ -111,6 +111,26 @@ class ReminderForegroundService : Service() {
                 screenWakeLock = null
             } catch (e: Exception) { }
         }
+
+        // v1.0.62: 取消指定提醒的所有追响闹钟（提到 companion object 静态方法）
+        // 供 AlarmActivity 直接调用（AlarmActivity 是独立 Activity，没有 Service 实例引用）
+        fun cancelFollowupAlarms(context: Context, reminderId: String) {
+            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            for (i in FOLLOWUP_DELAYS.indices) {
+                try {
+                    val intent = Intent(context, AlarmReceiver::class.java)
+                    // 追响闹钟用 reminderId.hashCode() + 20000 + i 作为 requestCode，与主闹钟(直接用hashCode)区分
+                    val pendingIntent = PendingIntent.getBroadcast(
+                        context,
+                        (reminderId.hashCode() and 0x7FFFFFFF) + 20000 + i,
+                        intent,
+                        PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+                    )
+                    pendingIntent?.let { alarmManager.cancel(it) }
+                } catch (e: Exception) { }
+            }
+            android.util.Log.d(TAG, "已取消提醒的所有追响闹钟: $reminderId")
+        }
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -590,25 +610,8 @@ class ReminderForegroundService : Service() {
             pendingIntent?.let { alarmManager.cancel(it) }
         } catch (e: Exception) { }
         // v1.0.61: 同时取消所有追响闹钟
-        cancelFollowupAlarms(reminderId)
-    }
-
-    // v1.0.61: 取消指定提醒的所有追响闹钟
-    private fun cancelFollowupAlarms(reminderId: String) {
-        for (i in FOLLOWUP_DELAYS.indices) {
-            try {
-                val intent = Intent(this, AlarmReceiver::class.java)
-                // 追响闹钟用 reminderId.hashCode() + 20000 + i 作为 requestCode，与主闹钟(直接用hashCode)区分
-                val pendingIntent = PendingIntent.getBroadcast(
-                    this,
-                    (reminderId.hashCode() and 0x7FFFFFFF) + 20000 + i,
-                    intent,
-                    PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
-                )
-                pendingIntent?.let { alarmManager.cancel(it) }
-            } catch (e: Exception) { }
-        }
-        android.util.Log.d(TAG, "已取消提醒的所有追响闹钟: $reminderId")
+        // v1.0.62: 改为 companion object 静态方法调用
+        cancelFollowupAlarms(this, reminderId)
     }
 
     // v1.0.61: 调度第N轮追响闹钟
