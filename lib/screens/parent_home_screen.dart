@@ -420,30 +420,36 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
               await _storage.saveReminder(reminder);
               print('🟢 长辈端: 从服务器同步提醒: ${reminder.content} (${reminder.formattedTime})');
             } else {
-              // v1.0.64: 无脑覆盖所有状态字段
-              // 修复 Bug 4 + Bug 7：local triggered + server confirmed 漏更新
-              // 修复 Bug 4：local pending/triggered + server pending(被snooze)漏 snooze_count 更新
-              // server 是 source of truth，全量覆盖最不容易出 bug
-              // 注：createdAt/content/voiceUrl 等"不可变字段"保留本地值，避免破坏未同步的本地创建/编辑
-              final updated = ReminderModel(
-                reminderId: serverId,
-                bindingId: localReminder.bindingId.isNotEmpty ? localReminder.bindingId : (j['binding_id'] ?? '').toString(),
-                createdBy: localReminder.createdBy.isNotEmpty ? localReminder.createdBy : (j['created_by'] ?? ''),
-                content: localReminder.content,
-                voiceUrl: localReminder.voiceUrl ?? j['voice_url'],
-                triggerTime: j['trigger_time'] != null ? DateTime.parse(j['trigger_time']) : localReminder.triggerTime,
-                repeatType: j['repeat_type'] ?? localReminder.repeatType,
-                repeatConfig: localReminder.repeatConfig,
-                category: j['category'] ?? localReminder.category,
-                priority: j['priority'] ?? localReminder.priority,
-                status: j['status'] ?? localReminder.status,
-                snoozeCount: j['snooze_count'] ?? localReminder.snoozeCount,
-                createdAt: localReminder.createdAt,
-              );
-              if (updated.status != localReminder.status || updated.snoozeCount != localReminder.snoozeCount) {
-                print('🟢 长辈端: 从服务器同步状态变更: $serverId ${localReminder.status}→${updated.status}, snooze=${updated.snoozeCount}');
+              // v1.0.65: 字段级 diff 同步（修复 v1.0.64 引入的 5 个 bug）
+              // 关键修复：v1.0.64 用"无脑构造完整 ReminderModel + saveReminder"在 for 循环里同步 N 次
+              //   1) 频繁 IO 阻塞 → ANR → 3-4 分钟后闪退
+              //   2) 整体覆盖可能误把其他 reminder 字段串了（用户报告时间跳到 13:49）
+              // 改用字段级 diff：只更新真正变化的字段
+              // 修复 Bug 4：snooze_count 变化时单独更新（子女端才能看到"已延后 X 次"）
+              // 修复 Bug 7：local triggered + server confirmed 时确认（不再卡在"待老人确认"）
+              final serverStatus = j['status']?.toString();
+              final serverSnoozeCount = j['snooze_count'] as int?;
+              final serverTriggerTimeStr = j['trigger_time']?.toString();
+
+              bool statusChanged = serverStatus != null && serverStatus != localReminder.status;
+              bool snoozeChanged = serverSnoozeCount != null && serverSnoozeCount != (localReminder.snoozeCount ?? 0);
+
+              if (statusChanged) {
+                await _storage.updateReminderStatus(serverId, serverStatus!);
               }
-              await _storage.saveReminder(updated);
+              if (snoozeChanged) {
+                await _storage.updateSnoozeCount(serverId, serverSnoozeCount!);
+              }
+              if (serverTriggerTimeStr != null) {
+                final serverTriggerTime = DateTime.parse(serverTriggerTimeStr);
+                if (serverTriggerTime != localReminder.triggerTime) {
+                  await _storage.updateTriggerTime(serverId, serverTriggerTime);
+                }
+              }
+
+              if (statusChanged || snoozeChanged) {
+                print('🟢 长辈端: 同步变更: $serverId ${localReminder.status}→$serverStatus, snooze=$serverSnoozeCount');
+              }
             }
           }
         }

@@ -149,6 +149,71 @@ class LocalStorageService {
   Future<bool> confirmReminder(String reminderId) async {
     return updateReminderStatus(reminderId, 'confirmed', confirmedAt: DateTime.now());
   }
+
+  /// v1.0.65: 单独更新 snooze_count
+  /// 修复 Bug 4：sync 阶段需要把 server 的 snooze_count 同步到本地
+  /// 避免在 for 循环里构造完整 ReminderModel（节省内存 + 避免 in-loop IO 阻塞导致 ANR）
+  Future<bool> updateSnoozeCount(String reminderId, int snoozeCount) async {
+    final prefs = await _preferences;
+    final keys = prefs.getKeys().where((k) => k.startsWith(_remindersKey));
+
+    for (final key in keys) {
+      final jsonStr = prefs.getString(key);
+      if (jsonStr != null) {
+        try {
+          final jsonList = jsonDecode(jsonStr) as List;
+          bool updated = false;
+          final newList = jsonList.map((j) {
+            if (j['reminder_id'] == reminderId) {
+              updated = true;
+              j['snooze_count'] = snoozeCount;
+            }
+            return j;
+          }).toList();
+
+          if (updated) {
+            await prefs.setString(key, jsonEncode(newList));
+            return true;
+          }
+        } catch (e) {
+          // continue
+        }
+      }
+    }
+    return false;
+  }
+
+  /// v1.0.65: 单独更新 trigger_time
+  /// snooze 后服务器会修改 trigger_time，sync 阶段需要把 server 的 trigger_time 同步到本地
+  Future<bool> updateTriggerTime(String reminderId, DateTime triggerTime) async {
+    final prefs = await _preferences;
+    final keys = prefs.getKeys().where((k) => k.startsWith(_remindersKey));
+
+    for (final key in keys) {
+      final jsonStr = prefs.getString(key);
+      if (jsonStr != null) {
+        try {
+          final jsonList = jsonDecode(jsonStr) as List;
+          bool updated = false;
+          final newList = jsonList.map((j) {
+            if (j['reminder_id'] == reminderId) {
+              updated = true;
+              j['trigger_time'] = triggerTime.toIso8601String();
+            }
+            return j;
+          }).toList();
+
+          if (updated) {
+            await prefs.setString(key, jsonEncode(newList));
+            return true;
+          }
+        } catch (e) {
+          // continue
+        }
+      }
+    }
+    return false;
+  }
   
   /// Bug 4 修复: Snooze提醒（延后5分钟）
   /// 关键修复：状态保持为'pending'，让闹钟轮询能在新时间再次触发

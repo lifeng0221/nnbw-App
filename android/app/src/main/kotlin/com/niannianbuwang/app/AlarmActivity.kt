@@ -166,21 +166,15 @@ class AlarmActivity : Activity() {
         ReminderForegroundService.stopAlarmSound()
         val reminderId = intent.getStringExtra(EXTRA_REMINDER_ID) ?: ""
         // 取消通知——v1.0.64 改为 cancelAll()（与 stopAlarmReceiver 一致）
-        // 修复 Bug 6：通知栏残留导致主界面"知道了"按钮看似失效
         try {
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
             manager.cancelAll()
         } catch (e: Exception) { }
-        // 切断追响——v1.0.62的Bug 4核心修复保留
-        if (reminderId.isNotEmpty()) {
-            try {
-                ReminderForegroundService.cancelFollowupAlarms(this, reminderId)
-                android.util.Log.d("AlarmActivity", "静默关闭：已切断reminder=$reminderId 追响，状态保持triggered")
-            } catch (e: Exception) {
-                android.util.Log.e("AlarmActivity", "静默关闭-取消追响失败", e)
-            }
-        }
-        android.util.Log.d("AlarmActivity", "静默关闭（5分钟超时）: $reminderId，**未**调confirmReminder")
+        // v1.0.65: 不再调 cancelFollowupAlarms！
+        // 原 v1.0.62 fix 设计是"5分钟超时后取消追响"——但用户反馈"追响不工作"
+        // 修正设计：5分钟超时后系统不再响铃当前 reminder，但后续追响点（5/15/30/60/120min）应继续工作
+        // 状态保持 triggered（**不**调 confirm），让追响机制能再次触发
+        android.util.Log.d("AlarmActivity", "静默关闭（5分钟超时）: $reminderId，**未**调confirmReminder，**未**取消追响")
         finish()
     }
 
