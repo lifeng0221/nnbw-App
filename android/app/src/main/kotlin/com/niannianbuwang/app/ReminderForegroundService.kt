@@ -262,7 +262,8 @@ class ReminderForegroundService : Service() {
                 // v1.0.61: 取消该提醒的所有追响闹钟
                 val reminderId = intent.getStringExtra(EXTRA_REMINDER_ID)
                 if (reminderId != null) {
-                    cancelFollowupAlarms(reminderId)
+                    // v1.0.62: 改为 companion object 静态方法调用（需传 context）
+                    cancelFollowupAlarms(context ?: this@ReminderForegroundService, reminderId)
                 }
                 // 取消所有提醒通知
                 try {
