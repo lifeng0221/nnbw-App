@@ -165,11 +165,11 @@ class AlarmActivity : Activity() {
     private fun silentDismiss() {
         ReminderForegroundService.stopAlarmSound()
         val reminderId = intent.getStringExtra(EXTRA_REMINDER_ID) ?: ""
-        // 取消通知
+        // 取消通知——v1.0.64 改为 cancelAll()（与 stopAlarmReceiver 一致）
+        // 修复 Bug 6：通知栏残留导致主界面"知道了"按钮看似失效
         try {
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-            val notificationId = 20000 + (reminderId.hashCode() and 0xFFF)
-            manager.cancel(notificationId)
+            manager.cancelAll()
         } catch (e: Exception) { }
         // 切断追响——v1.0.62的Bug 4核心修复保留
         if (reminderId.isNotEmpty()) {

@@ -338,7 +338,10 @@ class ReminderForegroundService : Service() {
                 for (i in 0 until jsonArray.length()) {
                     val obj = jsonArray.getJSONObject(i)
                     val status = obj.optString("status", "")
-                    if (status != "pending" && status != "confirmed" && status != "snoozed") continue
+                    // v1.0.64: 排除已 confirmed 状态
+                    // 修复 Bug 6：confirmed 状态被 schedule 一次后，会被再次触发响铃
+                    // 状态机约束：只有 pending(待响) 和 snoozed(snooze后等再响) 才允许调度
+                    if (status != "pending" && status != "snoozed") continue
                     
                     val reminderId = obj.optString("reminder_id", "")
                     if (reminderId.isEmpty()) continue
@@ -474,7 +477,10 @@ class ReminderForegroundService : Service() {
                     val reminderId = obj.optString("reminder_id", "")
                     val status = obj.optString("status", "")
 
-                    if (status != "pending" && status != "confirmed" && status != "snoozed") continue
+                    // v1.0.64: 排除已 confirmed 状态
+                    // 修复 Bug 6：confirmed 状态被 schedule 一次后，会被再次触发响铃
+                    // 状态机约束：只有 pending(待响) 和 snoozed(snooze后等再响) 才允许调度
+                    if (status != "pending" && status != "snoozed") continue
                     if (triggeredIds.contains(reminderId)) continue
 
                     val triggerTimeStr = obj.optString("trigger_time", "")

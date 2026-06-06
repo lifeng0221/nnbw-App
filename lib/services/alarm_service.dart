@@ -172,7 +172,12 @@ class AlarmService {
     
     for (int i = 0; i < _reminders.length; i++) {
       final r = _reminders[i];
-      if (r.status != 'pending' && r.status != 'confirmed' && r.status != 'snoozed') continue;
+      // v1.0.64: 排除 confirmed 状态
+      // 修复 Bug 6 真根因：confirmed 状态若被轮询，会因 trigger_time 已过而被加入 toTrigger，
+      //   _triggerReminderSafely → _triggerReminder 会把本地 status 改回 'triggered'，
+      //   导致主界面"知道了"按钮看似失效（status 在 triggered↔confirmed 之间反复）
+      // 状态机约束：只有 pending(待响) 和 snoozed(snooze后等再响) 才参与轮询
+      if (r.status != 'pending' && r.status != 'snoozed') continue;
       pendingCount++;
       if (_triggeredIds.contains(r.reminderId)) { alreadyTriggeredCount++; continue; }
       
