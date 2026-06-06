@@ -28,6 +28,30 @@ class AlarmActivity : Activity() {
     companion object {
         const val EXTRA_CONTENT = "reminder_content"
         const val EXTRA_REMINDER_ID = "reminder_id"
+
+        // v1.0.63: native queue 兜底
+        // Flutter 端 shared_preferences 插件自动加 "flutter." 前缀
+        // Kotlin 端写"裸"key（不带前缀），Flutter 端 getStringList('pending_confirms') 即可读到
+        // 实际 Android SharedPreferences 里的 key 是 "flutter.pending_confirms"
+        const val NATIVE_QUEUE_PREFS = "FlutterSharedPreferences"
+        const val NATIVE_QUEUE_KEY = "pending_confirms"
+    }
+
+    /**
+     * v1.0.63 native queue 兜底：AlarmActivity 写一个 StringSet
+     * Flutter 端下次 _loadData 时读取并消化（删掉已处理的 reminderId）
+     * 解决"MainActivity.methodChannel 为 null 时 invokeMethod 静默失败"问题
+     */
+    private fun writePendingConfirm(reminderId: String) {
+        try {
+            val prefs = getSharedPreferences(NATIVE_QUEUE_PREFS, Context.MODE_PRIVATE)
+            val current = prefs.getStringSet(NATIVE_QUEUE_KEY, mutableSetOf()) ?: mutableSetOf()
+            val newSet = HashSet(current).apply { add(reminderId) }
+            prefs.edit().putStringSet(NATIVE_QUEUE_KEY, newSet).apply()
+            android.util.Log.d("AlarmActivity", "native queue 已写入: $reminderId, 当前queue大小=${newSet.size}")
+        } catch (e: Exception) {
+            android.util.Log.e("AlarmActivity", "native queue 写入失败", e)
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -123,12 +147,41 @@ class AlarmActivity : Activity() {
         ).apply { gravity = Gravity.CENTER }
         layout.addView(dismissBtn, btnParams)
 
-        // 5分钟超时自动关闭
-        window.decorView.postDelayed({ dismissAlarm() }, 5 * 60 * 1000L)
+        // 5分钟超时自动关闭（v1.0.63改为静默关闭，不走确认流程）
+        // 原因：v1.0.62把"超时"和"主动按按钮"都走confirmReminder导致老人没按也被记成已确认
+        // 静默关闭：只停铃+取消通知+切断追响，保留triggered状态，等子女端继续关注
+        window.decorView.postDelayed({ silentDismiss() }, 5 * 60 * 1000L)
 
         setContentView(layout)
         
         android.util.Log.d("AlarmActivity", "全屏闹钟已显示: $content")
+    }
+
+    /**
+     * v1.0.63 静默关闭：5分钟超时或系统关闭时调用
+     * 不调confirmReminder——保持triggered状态，老人没按按钮就不算确认
+     * 保留"子女端看到🔔已响铃待老人确认"状态，等下次响铃或snooze超时
+     */
+    private fun silentDismiss() {
+        ReminderForegroundService.stopAlarmSound()
+        val reminderId = intent.getStringExtra(EXTRA_REMINDER_ID) ?: ""
+        // 取消通知
+        try {
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            val notificationId = 20000 + (reminderId.hashCode() and 0xFFF)
+            manager.cancel(notificationId)
+        } catch (e: Exception) { }
+        // 切断追响——v1.0.62的Bug 4核心修复保留
+        if (reminderId.isNotEmpty()) {
+            try {
+                ReminderForegroundService.cancelFollowupAlarms(this, reminderId)
+                android.util.Log.d("AlarmActivity", "静默关闭：已切断reminder=$reminderId 追响，状态保持triggered")
+            } catch (e: Exception) {
+                android.util.Log.e("AlarmActivity", "静默关闭-取消追响失败", e)
+            }
+        }
+        android.util.Log.d("AlarmActivity", "静默关闭（5分钟超时）: $reminderId，**未**调confirmReminder")
+        finish()
     }
 
     private fun dismissAlarm() {
@@ -153,13 +206,22 @@ class AlarmActivity : Activity() {
                 android.util.Log.e("AlarmActivity", "取消追响闹钟失败", e)
             }
 
-            // 4) v1.0.62: 通过 MethodChannel 通知 Flutter 端走 _confirmReminder 流程
+            // 4) v1.0.62: 优先通过 MethodChannel 通知 Flutter 端走 _confirmReminder 流程
             //    (status→confirmed + 同步后端 + UI刷新)
-            try {
-                MainActivity.methodChannel?.invokeMethod("confirmReminder", reminderId)
-                android.util.Log.d("AlarmActivity", "已通知Flutter端确认: $reminderId")
-            } catch (e: Exception) {
-                android.util.Log.e("AlarmActivity", "通知Flutter确认失败", e)
+            val ch = MainActivity.methodChannel
+            if (ch != null) {
+                try {
+                    ch.invokeMethod("confirmReminder", reminderId)
+                    android.util.Log.d("AlarmActivity", "已通知Flutter端确认: $reminderId")
+                } catch (e: Exception) {
+                    android.util.Log.e("AlarmActivity", "通知Flutter确认异常，写入native queue兜底", e)
+                    writePendingConfirm(reminderId)
+                }
+            } else {
+                // v1.0.63: methodChannel为null（MainActivity未创建/已被销毁）时，写native queue兜底
+                // Flutter端下次_loadData时消化这个queue
+                android.util.Log.w("AlarmActivity", "methodChannel为null，写入native queue兜底: $reminderId")
+                writePendingConfirm(reminderId)
             }
         }
 

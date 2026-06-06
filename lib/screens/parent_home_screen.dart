@@ -437,6 +437,9 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
   }
 
   Future<void> _loadReminders() async {
+    // v1.0.63: 先消化 native queue（AlarmActivity 在 methodChannel 为 null 时写入的兜底）
+    await _consumeNativePendingConfirms();
+
     final appState = context.read<AppState>();
     if (appState.userId == null) {
       setState(() => _isLoading = false);
@@ -1077,6 +1080,36 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> with TickerProvider
     await _loadReminders();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已确认完成'), backgroundColor: AppColors.confirm));
+  }
+
+  /// v1.0.63: 消化 AlarmActivity 写入 native SharedPreferences 的兜底队列
+  /// 解决 Bug 5：MainActivity.methodChannel 为 null 时 invokeMethod 静默失败
+  /// 关键：Flutter 端 shared_preferences 插件自动加 "flutter." 前缀
+  ///      Kotlin 端写裸 key，Flutter 端用同名裸 key 读
+  Future<void> _consumeNativePendingConfirms() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final pending = prefs.getStringList('pending_confirms');
+      if (pending == null || pending.isEmpty) return;
+      print('🟢 [parent] 消化 native pending confirms 队列: ${pending.length}条');
+      for (final reminderId in pending) {
+        try {
+          await _storage.confirmReminder(reminderId);
+          final serverId = int.tryParse(reminderId);
+          if (serverId != null) {
+            _apiService.updateReminderStatus(serverId, 'confirmed').catchError((e) => print('同步native confirm失败: $e'));
+          }
+          print('🟢 [parent] 已消化 native confirm: $reminderId');
+        } catch (e) {
+          print('🔴 [parent] 消化 native confirm 失败: $reminderId, $e');
+        }
+      }
+      // 幂等清空：即使 invokeMethod 成功调过也是 confirmed 状态，再调一次没副作用
+      await prefs.remove('pending_confirms');
+      print('🟢 [parent] native queue 已清空');
+    } catch (e) {
+      print('🔴 [parent] 消化 native queue 异常: $e');
+    }
   }
 
   Future<void> _snoozeReminder(ReminderModel r) async {

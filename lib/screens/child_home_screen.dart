@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import 'package:intl/intl.dart';
 import '../main.dart';
@@ -485,7 +486,39 @@ class _ChildHomeScreenState extends State<ChildHomeScreen> {
     await _loadData();
   }
 
+  /// v1.0.63: 消化 AlarmActivity 写入 native SharedPreferences 的兜底队列
+  /// 解决 Bug 5：MainActivity.methodChannel 为 null 时 invokeMethod 静默失败
+  /// 关键：Flutter 端 shared_preferences 插件自动加 "flutter." 前缀
+  ///      Kotlin 端也写**不带**前缀的 key，Flutter 端 getStringList('pending_confirms') 即可读到
+  Future<void> _consumeNativePendingConfirms() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final pending = prefs.getStringList('pending_confirms');
+      if (pending == null || pending.isEmpty) return;
+      print('🟢 [child] 消化 native pending confirms 队列: ${pending.length}条');
+      for (final reminderId in pending) {
+        try {
+          await _storage.confirmReminder(reminderId);
+          final serverId = int.tryParse(reminderId);
+          if (serverId != null) {
+            _apiService.updateReminderStatus(serverId, 'confirmed').catchError((e) => print('同步native confirm失败: $e'));
+          }
+          print('🟢 [child] 已消化 native confirm: $reminderId');
+        } catch (e) {
+          print('🔴 [child] 消化 native confirm 失败: $reminderId, $e');
+        }
+      }
+      await prefs.remove('pending_confirms');
+      print('🟢 [child] native queue 已清空');
+    } catch (e) {
+      print('🔴 [child] 消化 native queue 异常: $e');
+    }
+  }
+
   Future<void> _loadData() async {
+    // v1.0.63: 先消化 native queue（AlarmActivity 在 methodChannel 为 null 时写入的兜底）
+    await _consumeNativePendingConfirms();
+
     final appState = context.read<AppState>();
     if (appState.userId == null) { setState(() => _isLoading = false); return; }
 
